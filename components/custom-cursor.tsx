@@ -70,6 +70,11 @@ export default function CustomCursor() {
 
   const [magneticPos, setMagneticPos] = useState({ x: 0, y: 0 });
   const [isMagnetic, setIsMagnetic] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   useEffect(() => {
     if (prefersReducedMotion) return undefined;
@@ -217,7 +222,7 @@ export default function CustomCursor() {
     }
   }, [mouseX, mouseY, prefersReducedMotion]);
 
-  if (prefersReducedMotion) return null;
+  if (!isMounted || prefersReducedMotion) return null;
 
   return (
     <>

@@ -143,6 +143,9 @@ export default function CalmViz() {
                      {/* Lock barrier */}
                      <div className="hidden sm:block absolute top-1/2 left-1/4 -translate-y-1/2 h-16 w-2 bg-red-500/50 rounded-full" />
                      <div className="hidden sm:block absolute top-1/2 right-1/4 -translate-y-1/2 h-16 w-2 bg-red-500/50 rounded-full" />
+                     
+                     <div className="block sm:hidden absolute left-1/2 top-[-10px] -translate-x-1/2 w-16 h-2 bg-red-500/50 rounded-full" />
+                     <div className="block sm:hidden absolute left-1/2 bottom-[-10px] -translate-x-1/2 w-16 h-2 bg-red-500/50 rounded-full" />
 
                      <div className="h-20 w-28 bg-slate-950 border-2 border-red-500/50 rounded-xl flex flex-col items-center justify-center shadow-[0_0_20px_rgba(239,68,68,0.15)] z-10 relative bg-opacity-90">
                         <ShieldAlert className="h-6 w-6 text-red-400 mb-1" />

@@ -257,8 +257,7 @@ export default function CancelProtocolViz() {
           <span className="font-mono text-white">{Math.round(budget)}%</span>
         </div>
         <div
-          className="h-2.5 w-full overflow-hidden rounded-full"
-          style={{ background: "#0A1628" }}
+          className="h-2.5 w-full overflow-hidden rounded-full bg-slate-900/40"
         >
           <motion.div
             className="h-full rounded-full"
@@ -295,14 +294,14 @@ export default function CancelProtocolViz() {
         <button
           onClick={triggerCancel}
           disabled={isAnimating || phase === "Completed"}
-          className="rounded-lg px-5 py-2 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-lg px-5 py-2 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
           style={{ background: "#F97316" }}
         >
           Trigger Cancel
         </button>
         <button
           onClick={reset}
-          className="rounded-lg border px-5 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/5"
+          className="rounded-lg border px-5 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
           style={{ borderColor: "#1e293b" }}
         >
           Reset
@@ -311,8 +310,8 @@ export default function CancelProtocolViz() {
 
       {/* ---- Comparison Panel ---- */}
       <div
-        className="mx-auto mt-6 max-w-2xl rounded-xl border p-4"
-        style={{ borderColor: "#1e293b", background: "#0A1628" }}
+        className="mx-auto mt-6 max-w-2xl rounded-xl border p-4 bg-slate-900/40"
+        style={{ borderColor: "#1e293b" }}
       >
         <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
           Comparison: Tokio&apos;s Approach

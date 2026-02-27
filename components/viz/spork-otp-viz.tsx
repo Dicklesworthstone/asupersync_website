@@ -82,10 +82,10 @@ export default function SporkOtpViz() {
         </div>
       </div>
 
-      <div className="relative min-h-[16rem] py-8 flex flex-col sm:flex-row items-center justify-between gap-12 sm:gap-4 px-4 sm:px-12 border border-white/5 bg-black/40 rounded-xl overflow-hidden">
+      <div className="relative min-h-[16rem] py-8 flex items-center justify-between px-4 sm:px-12 border border-white/5 bg-black/40 rounded-xl overflow-x-auto">
          
          {/* Client Task */}
-         <div className="flex flex-col items-center z-10">
+         <div className="flex flex-col items-center z-10 min-w-[100px]">
             <div className="h-16 w-16 rounded-xl border-2 border-slate-600 bg-slate-800 flex items-center justify-center mb-3">
                <Layers className="h-8 w-8 text-slate-400" />
             </div>
@@ -100,7 +100,7 @@ export default function SporkOtpViz() {
          </div>
 
          {/* Connection / Message Transit */}
-         <div className="flex-1 relative w-full h-16 sm:h-full flex flex-col justify-center">
+         <div className="flex-1 relative min-w-[160px] h-full flex flex-col justify-center mx-4">
             {/* Track */}
             <div className="absolute top-1/2 left-0 w-full h-0.5 bg-slate-700 -translate-y-1/2" />
             
@@ -152,7 +152,7 @@ export default function SporkOtpViz() {
                   >
                      <div className="bg-red-950/80 border border-red-500/50 rounded-lg p-3 backdrop-blur-sm shadow-xl min-w-[140px]">
                         <ShieldAlert className="h-6 w-6 text-red-500 mx-auto mb-2" />
-                        <div className="text-[11px] font-bold text-red-400 uppercase tracking-widest leading-tight">Client Hangs<br className="hidden sm:block" /> Forever</div>
+                        <div className="text-[11px] font-bold text-red-400 uppercase tracking-widest leading-tight">Client Hangs Forever</div>
                         <div className="text-[11px] text-red-300 mt-1">Server forgot to reply.</div>
                      </div>
                   </motion.div>
@@ -161,7 +161,7 @@ export default function SporkOtpViz() {
          </div>
 
          {/* GenServer */}
-         <div className="flex flex-col items-center z-10">
+         <div className="flex flex-col items-center z-10 min-w-[100px]">
             <div className={`h-24 w-24 rounded-xl border-2 flex flex-col items-center justify-center mb-3 transition-colors duration-500 ${
                msgState === "processing" ? "border-blue-500 bg-blue-900/20" : 
                msgState === "leaked" ? "border-red-500 bg-red-900/20" :

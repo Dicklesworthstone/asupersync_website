@@ -458,7 +458,7 @@ export default function TokioComparisonViz() {
         {phase === "done" && (
           <motion.button
             onClick={handleReset}
-            className="rounded-md border px-3 py-1 font-mono text-xs transition-colors hover:bg-white/5"
+            className="rounded-md border px-3 py-1 font-mono text-xs transition-colors hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             style={{ borderColor: `${BLUE}44`, color: BLUE_GLOW }}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -474,7 +474,7 @@ export default function TokioComparisonViz() {
         <motion.button
           onClick={handleCancel}
           disabled={phase === "cancelling" || phase === "done"}
-          className="rounded-lg border px-6 py-2 font-mono text-sm font-bold tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-lg border px-6 py-2 font-mono text-sm font-bold tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
           style={{
             borderColor: phase === "running" ? `${RED}88` : `${SURFACE}88`,
             color: phase === "running" ? RED_GLOW : `${BLUE_GLOW}44`,
