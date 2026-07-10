@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu, X, Home, Eye, Cpu, Zap, ChevronRight, Globe, Sparkles, BookOpen } from "lucide-react";
+import { Menu, X, Home, Eye, Cpu, Zap, ChevronRight, Globe, Sparkles, BookOpen, Droplets } from "lucide-react";
 import { useState, useEffect } from "react";
 import { navItems, siteConfig } from "@/lib/content";
 import { useBodyScrollLock } from "@/hooks/use-body-scroll-lock";
@@ -33,6 +33,7 @@ export default function SiteHeader() {
   const getIcon = (label: string) => {
     switch (label.toLowerCase()) {
       case 'home': return Home;
+      case 'atp': return Droplets;
       case 'interactive demos': return Sparkles;
       case 'architecture': return Cpu;
       case 'glossary': return BookOpen;
@@ -44,11 +45,11 @@ export default function SiteHeader() {
   return (
     <>
       {/* DESKTOP NAVBAR */}
-      <div className="fixed top-0 left-0 right-0 z-50 hidden md:block pointer-events-none h-24">
+      <div className="fixed top-0 left-0 right-0 z-50 hidden lg:block pointer-events-none h-24">
         <header
           className={cn(
             "absolute top-6 left-1/2 -translate-x-1/2 flex items-center transition-all duration-500 pointer-events-auto",
-            "w-[95%] lg:w-[1200px] h-16 px-8 rounded-full border border-white/5",
+            "w-[95%] max-w-[1200px] h-16 px-8 rounded-full border border-white/5",
             scrolled ? "glass-modern shadow-2xl scale-[0.98] border-blue-500/20" : "bg-transparent border-transparent"
           )}
         >
@@ -69,9 +70,9 @@ export default function SiteHeader() {
             </div>
           )}
 
-          <div className="grid grid-cols-3 w-full relative z-10 h-full items-center">
+          <div className="flex w-full relative z-10 h-full items-center justify-between gap-4">
             {/* Logo */}
-            <div className="flex justify-start">
+            <div className="flex justify-start shrink-0">
               <Link href="/" className="flex items-center gap-3 group shrink-0">
                 <div className="relative flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-tr from-blue-600 to-blue-400 shadow-lg transition-transform group-hover:scale-105 active:scale-95 overflow-visible">
                   <SyncNode color="#3B82F6" baseScale={0.5} className="absolute -left-1 -top-1 z-20" />
@@ -94,7 +95,7 @@ export default function SiteHeader() {
             </div>
 
             {/* Navigation */}
-            <nav className="flex items-center justify-center gap-1 h-full">
+            <nav className="flex flex-1 min-w-0 items-center justify-center gap-1 h-full">
               {navItems.map((item) => {
                 const active = pathname === item.href || (item.href !== "/" && pathname?.startsWith(item.href));
                 return (
@@ -102,7 +103,7 @@ export default function SiteHeader() {
                     key={item.href}
                     href={item.href}
                     className={cn(
-                      "px-4 h-9 flex items-center justify-center text-[10px] font-black uppercase tracking-[0.15em] transition-colors rounded-full relative",
+                      "px-2.5 xl:px-4 h-9 flex items-center justify-center text-center text-[10px] font-black uppercase tracking-[0.15em] transition-colors rounded-full relative",
                       active ? "text-blue-400 bg-blue-500/10" : "text-slate-300 hover:text-white hover:bg-white/5"
                     )}
                   >
@@ -135,13 +136,14 @@ export default function SiteHeader() {
       </div>
 
       {/* MOBILE BOTTOM NAV */}
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 md:hidden w-[90%] pointer-events-none">
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 lg:hidden w-[90%] max-w-md pointer-events-none">
         <nav className="glass-modern h-16 rounded-2xl border border-white/10 flex items-center justify-around px-2 pointer-events-auto shadow-2xl">
           {navItems.slice(0, 4).map((item) => {
             const active = pathname === item.href || (item.href !== "/" && pathname?.startsWith(item.href));
             const Icon = getIcon(item.label);
             const shortLabel: Record<string, string> = {
               "Home": "Home",
+              "ATP": "ATP",
               "Interactive Demos": "Demos",
               "Architecture": "Arch.",
               "Get Started": "Start",
@@ -181,14 +183,14 @@ export default function SiteHeader() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setOpen(false)}
-              className="fixed inset-0 bg-black/90 backdrop-blur-md z-[70] md:hidden"
+              className="fixed inset-0 bg-black/90 backdrop-blur-md z-[70] lg:hidden"
             />
             <motion.div
               initial={{ x: "100%" }}
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="fixed top-0 right-0 bottom-0 w-[80%] z-[80] bg-[#020a14] border-l border-blue-500/20 p-8 flex flex-col md:hidden pointer-events-auto text-left"
+              className="fixed top-0 right-0 bottom-0 w-[80%] max-w-sm z-[80] bg-[#020a14] border-l border-blue-500/20 p-8 flex flex-col lg:hidden pointer-events-auto text-left"
             >
               <div className="flex items-center justify-between mb-12">
                 <span className="text-xs font-black text-blue-500 uppercase tracking-[0.4em]">RUNTIME_MENU</span>

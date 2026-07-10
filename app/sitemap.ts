@@ -4,6 +4,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
   const baseUrl = "https://asupersync.com";
   return [
     { url: baseUrl, lastModified: new Date(), changeFrequency: "weekly", priority: 1.0 },
+    { url: `${baseUrl}/atp`, lastModified: new Date(), changeFrequency: "weekly", priority: 0.9 },
     { url: `${baseUrl}/showcase`, lastModified: new Date(), changeFrequency: "weekly", priority: 0.9 },
     { url: `${baseUrl}/architecture`, lastModified: new Date(), changeFrequency: "monthly", priority: 0.8 },
     { url: `${baseUrl}/spec-explorer`, lastModified: new Date(), changeFrequency: "monthly", priority: 0.7 },

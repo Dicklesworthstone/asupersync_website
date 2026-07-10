@@ -14,6 +14,7 @@ export const siteConfig = {
 
 export const navItems = [
   { href: "/", label: "Home" },
+  { href: "/atp", label: "ATP" },
   { href: "/showcase", label: "Interactive Demos" },
   { href: "/architecture", label: "Architecture" },
   { href: "/spec-explorer", label: "Spec Docs" },
