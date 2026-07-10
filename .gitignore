@@ -38,3 +38,5 @@ storage.sqlite3-*
 
 # Local scratch scripts
 update_page.js
+.vercel
+.env*
