@@ -13,12 +13,25 @@ export const metadata: Metadata = {
     siteName: "Asupersync",
     locale: "en_US",
     type: "website",
+    // X drops twitter:image/og:image URLs with query strings often enough
+    // that we bypass the file-convention routes (which append a cache-bust
+    // query) in favor of clean static paths.
+    images: [
+      {
+        url: "https://asupersync.com/images/atp-og.jpg",
+        width: 1200,
+        height: 630,
+        type: "image/jpeg",
+        alt: "ATP — Asupersync Transfer Protocol",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: "ATP — Fountain-Coded File Transfer",
     description:
       "Fountain-coded file transfer that outruns tuned rsync on real networks. Any K symbols rebuild the file; loss becomes a bandwidth line item, not a stall.",
+    images: ["https://asupersync.com/images/atp-twitter.jpg"],
   },
 };
 
