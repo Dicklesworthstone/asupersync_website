@@ -1,7 +1,26 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef } from "react";
-import { motion, useMotionValue, AnimatePresence, useReducedMotion, type MotionValue } from "framer-motion";
+import { useEffect, useState, useMemo, useRef, useSyncExternalStore } from "react";
+import { motion, useMotionValue, AnimatePresence, type MotionValue } from "framer-motion";
+
+// Hydration-safe reduced-motion detection. framer's useReducedMotion reads the
+// media query synchronously on the client but is null during SSR, so branching
+// render output on it desyncs server and client HTML (React #418). With
+// useSyncExternalStore the hydration render always uses the server snapshot
+// (false) and flips immediately after, which React handles without a mismatch.
+function subscribeReducedMotion(callback: () => void) {
+  const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+  mq.addEventListener("change", callback);
+  return () => mq.removeEventListener("change", callback);
+}
+
+function useHydrationSafeReducedMotion(): boolean {
+  return useSyncExternalStore(
+    subscribeReducedMotion,
+    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    () => false
+  );
+}
 
 function prng(seed: number): number {
   const x = Math.sin(seed) * 10000;
@@ -55,7 +74,7 @@ function DataDebris({ x, y }: { x: MotionValue<number>; y: MotionValue<number> }
 }
 
 export default function CustomCursor() {
-  const prefersReducedMotion = useReducedMotion();
+  const prefersReducedMotion = useHydrationSafeReducedMotion();
   const [isPointer, setIsPointer] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
   const [isClicking, setIsClicking] = useState(false);
