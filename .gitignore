@@ -36,6 +36,13 @@ storage.sqlite3-*
 # Beads viewer local config/cache
 .bv/
 
+# Beads local DB + rotation snapshots (issues.jsonl is the tracked source of truth)
+.beads/*.db
+.beads/*.db-*
+.beads/.br_history/
+.beads/*.lock
+.beads/last-touched
+
 # Local scratch scripts
 update_page.js
 .vercel
