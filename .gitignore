@@ -35,6 +35,10 @@ storage.sqlite3-*
 
 # Beads viewer local config/cache
 .bv/
+# Beads history snapshots and local WAL certification sidecars
+.beads/.br_history/
+.beads/*wal-cert
+.beads/*wal-cert-head
 
 # Beads local DB + rotation snapshots (issues.jsonl is the tracked source of truth)
 .beads/*.db
