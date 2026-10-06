@@ -2,11 +2,11 @@ import type { Metadata } from "next";
 import SpecViewerLoader from "@/components/spec-explorer/spec-viewer-loader";
 
 export const metadata: Metadata = {
-  title: "Spec Docs — Asupersync",
+  title: "Spec Docs",
   description:
     "The design documents behind Asupersync: the on-ramp, the formal semantics, the Spork and RaptorQ specs, threat models, and the testing methodology, mirrored from the main repository.",
   openGraph: {
-    title: "Spec Docs — Asupersync",
+    title: "Spec Docs | Asupersync",
     description: "The design documents behind Asupersync, mirrored from the main repository.",
   },
 };

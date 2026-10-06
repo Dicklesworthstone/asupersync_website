@@ -4,11 +4,11 @@ import AtpPage from "@/components/atp/atp-page";
 export const metadata: Metadata = {
   title: "ATP — Fountain-Coded File Transfer",
   description:
-    "atp encodes files into RaptorQ fountain symbols so packet loss costs bandwidth instead of round trips. 2.9–4.8× faster than tuned rsync on small files, line rate on clean gigabit, SHA-256-verified always.",
+    "atp encodes files into RaptorQ fountain symbols so packet loss costs bandwidth instead of round trips. On the plaintext tier, 500 KB files move 2.9–4.8× faster than a tuned rsync daemon; line rate on clean gigabit; SHA-256 verified on every transfer.",
   openGraph: {
     title: "ATP — Fountain-Coded File Transfer",
     description:
-      "Fountain-coded file transfer that outruns tuned rsync on real networks. Any K symbols rebuild the file; loss becomes a bandwidth line item, not a stall.",
+      "Fountain-coded file transfer. Any K symbols rebuild the file, so packet loss becomes a bandwidth line item instead of a stall. Measured against tuned rsync, losses included.",
     url: "https://asupersync.com/atp",
     siteName: "Asupersync",
     locale: "en_US",
@@ -30,7 +30,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "ATP — Fountain-Coded File Transfer",
     description:
-      "Fountain-coded file transfer that outruns tuned rsync on real networks. Any K symbols rebuild the file; loss becomes a bandwidth line item, not a stall.",
+      "Fountain-coded file transfer. Any K symbols rebuild the file, so packet loss becomes a bandwidth line item instead of a stall. Measured against tuned rsync, losses included.",
     images: ["https://asupersync.com/images/atp-twitter.jpg"],
   },
 };

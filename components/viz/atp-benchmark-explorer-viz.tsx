@@ -92,46 +92,37 @@ const PLAINTEXT_ROWS: Row[] = [
   },
 ];
 
-// QUIC + TLS 1.3 vs rsync over ssh with aes128-gcm. Sparser board; the
-// clean-large gap is a userspace-QUIC vs kernel-TCP frontier, printed anyway.
+// QUIC + TLS 1.3 vs rsync over ssh with aes128-gcm, from the committed
+// asupersync scorecard artifacts/atp_bench_matrix/20260902T151751Z (atp 0.4.10,
+// medians of 3-5 reps, SHA-256 verified every rep). The broken regime wasn't
+// run for this board.
 const ENCRYPTED_ROWS: Row[] = [
-  {
-    workload: "500 KB file",
-    cells: {
-      perfect: { ratio: 0.33, display: "3.0× faster" },
-      good: { ratio: 0.2, display: "5.0× faster", note: "QUIC 1-RTT vs ssh session setup" },
-      bad: { ratio: null },
-      broken: { ratio: null },
-    },
-  },
   {
     workload: "50 MB file",
     cells: {
-      perfect: { ratio: 1.48, note: "noisy cell" },
-      good: { ratio: 0.98 },
-      bad: { ratio: null },
+      perfect: { ratio: 0.78, note: "rsync side noisy (cv 18.5%)" },
+      good: { ratio: 0.87 },
+      bad: { ratio: 0.81 },
       broken: { ratio: null },
     },
   },
   {
-    workload: "500 MB file",
+    workload: "Tree · small files",
     cells: {
-      perfect: { ratio: 1.47, note: "atp ~74 MB/s vs ssh ~108 MB/s" },
-      good: { ratio: null },
-      bad: { ratio: null },
-      broken: { ratio: null },
-    },
-  },
-  {
-    workload: "Tree · 2,000 small files",
-    cells: {
-      perfect: { ratio: 1.4, display: "rsync 1.2–1.6× faster" },
-      good: { ratio: 1.0, display: "parity" },
-      bad: { ratio: null },
+      perfect: { ratio: 4.01, display: "rsync 4.0× faster", note: "per-file overhead dominates a sub-second rsync" },
+      good: { ratio: 1.74 },
+      bad: { ratio: 0.81, note: "rsync side noisy (cv 13.2%)" },
       broken: { ratio: null },
     },
   },
 ];
+
+const TIER_NOTES: Record<Tier, string> = {
+  plaintext:
+    "atp 0.3.5 release builds against the tuned rsync daemon, as published on the atp README's board.",
+  encrypted:
+    "atp 0.4.10 over QUIC + TLS 1.3 against rsync over ssh (aes128-gcm), from the scorecard committed on 2026-09-02. ATP also used 1.6–2.1× rsync's sender memory. Across a real WAN path (Ashburn to France, ~90 ms RTT), ATP over QUIC moved 6.3 MB/s where ATP over TCP moved 20 MB/s: at that RTT the QUIC sender is window-limited. No unqualified \"beats rsync\" claim is made for this tier.",
+};
 
 // Computed from the cells actually shown, so the summary can never drift
 // from the board above it.
@@ -314,6 +305,7 @@ export default function AtpBenchmarkExplorerViz() {
             <span className="text-sm font-mono text-slate-600">no measured cells on this board</span>
           )}
         </div>
+        <p className="mt-3 text-[11px] text-slate-500 leading-relaxed">{TIER_NOTES[tier]}</p>
       </div>
 
       {/* Headline cells */}

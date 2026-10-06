@@ -29,8 +29,8 @@ git clone <your-repo-url> asupersync_website && cd asupersync_website && bun ins
 
 | Capability | What You Get |
 |---|---|
-| **Interactive demos** | 20+ client-side visualizations across cancellation, scheduler behavior, semantics, and security models |
-| **Spec Explorer** | Built-in document browser for 26 markdown spec files under `public/spec-docs/` |
+| **Interactive demos** | 25 visualizations on `/showcase`, each labeled with how the mechanism ships (on by default, API, lab-only, opt-in, diagnostic, or formal model), plus five on `/atp` |
+| **Spec Explorer** | Browser for 30 design docs mirrored verbatim from the upstream repo into `public/spec-docs/`, with relative links resolved to GitHub |
 | **Structured content model** | Centralized content in `lib/content.ts` and `lib/spec-docs.ts` for maintainable updates |
 | **Modern frontend stack** | Next.js 16 App Router + React 19 + strict TypeScript + Tailwind 4 + framer-motion |
 | **Performance-aware UX** | Dynamic imports for heavy visualizations, reduced-motion support, and virtualized large lists |
@@ -67,20 +67,23 @@ bun run build
 2. **Single-source content**
    Most site data lives in `lib/content.ts` and `lib/spec-docs.ts` to keep edits deterministic and reviewable.
 
-3. **Performance over novelty**
+3. **Claims track upstream**
+   Every number and guarantee on the site should match the upstream asupersync README and source. When upstream changes (a new release, new benchmark tables, an oracle wired up), update `siteConfig.version`, the benchmark rows, `labOracles`, the roadmap, and the mirrored spec docs together. Code samples come from upstream `examples/` and the README, never invented.
+
+4. **Performance over novelty**
    Heavy components are loaded dynamically and interactive sections respect reduced-motion and practical rendering constraints.
 
-4. **Explicit engineering constraints**
+5. **Explicit engineering constraints**
    Bun is required, strict TypeScript is enabled, and checks are expected before release.
 
-5. **Operational clarity**
+6. **Operational clarity**
    Build/test/deploy conventions are straightforward: local verify first, then Vercel deploy flow.
 
 ## Comparison
 
 | Dimension | This Project | Typical Marketing Microsite | Plain Markdown Docs |
 |---|---|---|---|
-| Runtime concept visualizations | ✅ 20+ interactive demos | ⚠️ Usually minimal | ❌ None |
+| Runtime concept visualizations | ✅ 30 interactive demos | ⚠️ Usually minimal | ❌ None |
 | Searchable in-site spec docs | ✅ Integrated explorer | ❌ Rare | ⚠️ Search depends on host |
 | Typed, centralized content model | ✅ Structured TS data | ⚠️ Mixed patterns | ⚠️ Unstructured text files |
 | Animation + motion accessibility | ✅ Present | ⚠️ Inconsistent | ❌ N/A |
@@ -189,14 +192,18 @@ export default nextConfig;
 ```ts
 export const siteConfig = {
   name: "Asupersync",
-  title: "Asupersync - The Cancel-Correct Async Runtime for Rust",
+  title: "Asupersync — Cancel-Correct Async for Rust",
   description: "...",
   url: "https://asupersync.com",
   github: "https://github.com/Dicklesworthstone/asupersync",
+  demoUrl: "https://dicklesworthstone.github.io/asupersync/asupersync_web_demo.html",
+  version: "0.5.0",     // latest on crates.io; shown in the hero and footer
+  mainVersion: "0.6.0", // unreleased line on main
 };
 
 export const navItems = [
   { href: "/", label: "Home" },
+  { href: "/atp", label: "ATP" },
   { href: "/showcase", label: "Interactive Demos" },
   { href: "/architecture", label: "Architecture" },
   { href: "/spec-explorer", label: "Spec Docs" },

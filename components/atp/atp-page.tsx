@@ -66,7 +66,7 @@ const RAPTORQ_ESSAY = "https://jeffreyemanuel.com/writing/raptorq";
 
 const atpStats: Stat[] = [
   { label: "Clean 1 Gbit path", value: "946", helper: "Mbit/s sustained · effectively line rate" },
-  { label: "Small-file speedup", value: "4.8", helper: "× vs tuned rsync · at least 2.9× in every regime" },
+  { label: "500 KB, plaintext tier", value: "4.8", helper: "× vs tuned rsyncd · at least 2.9× in every regime" },
   { label: "Ledger experiments", value: "230+", helper: "Append-only · failed hypotheses stay on the record" },
   { label: "Unverified bytes landed", value: "0", helper: "SHA-256 + Merkle on every transfer · fails closed" },
 ];
@@ -370,8 +370,10 @@ export default function AtpPage() {
               >
                 atp turns every file into a fountain of interchangeable RaptorQ symbols (RFC 6330). Any K of
                 them, plus a little slack, rebuild the original. Which packets die stops mattering, so loss
-                costs bandwidth instead of round trips. It outruns tuned rsync by 2.9&ndash;4.8&times; on small
-                files, holds line rate on clean gigabit, and refuses to land a single unverified byte.
+                costs bandwidth instead of round trips. On the plaintext tier it moves 500&nbsp;KB files
+                2.9&ndash;4.8&times; faster than a tuned rsync daemon and holds line rate on clean gigabit.
+                Encrypted, it wins on lossy links and loses on small trees over clean ones. Either way, it
+                won&rsquo;t commit a byte it hasn&rsquo;t verified.
               </motion.p>
 
               <motion.div
@@ -728,8 +730,13 @@ export default function AtpPage() {
             </summary>
             <div className="px-8 pb-6 text-slate-400 leading-relaxed text-sm space-y-3">
               <p>
-                You&rsquo;re pushing huge single encrypted files over pristine fast links. Kernel TCP still
-                beats userspace QUIC there by about 1.5&times;.
+                You&rsquo;re syncing trees of small files over a clean, fast link with encryption. In the
+                2026-09-02 scorecard, rsync over ssh finished in 0.74&nbsp;s where atp over QUIC took 2.95&nbsp;s:
+                per-file overhead dominates a sub-second rsync.
+              </p>
+              <p>
+                You&rsquo;re crossing a long-RTT WAN with TLS. Around 90&nbsp;ms RTT the QUIC sender is
+                window-limited: 6.3&nbsp;MB/s, against 20&nbsp;MB/s for atp&rsquo;s own TCP transport on the same path.
               </p>
               <p>
                 You need <code className="text-blue-400 font-mono">--exclude</code>,{" "}
