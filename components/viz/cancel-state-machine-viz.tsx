@@ -17,17 +17,17 @@ interface Transition {
 }
 
 const STATES: State[] = [
-  { id: "running", label: "Running", color: "#22C55E", description: "Task executing normally. No cancellation pending." },
-  { id: "cancel-requested", label: "Cancel\nRequested", color: "#EAB308", description: "Cancel signal received. Task sees CancelRequested on its Cx. Begins preparing for shutdown." },
-  { id: "cancelling", label: "Cancelling", color: "#F97316", description: "Drain phase active. Task has budgeted time to flush buffers, close connections, release locks." },
-  { id: "finalizing", label: "Finalizing", color: "#EF4444", description: "Drain budget expired or task finished draining. Registered finalizers execute in LIFO order." },
-  { id: "completed", label: "Completed", color: "#3B82F6", description: "All finalizers have run. Resources released. Cancel Fuel fully consumed. Clean exit." },
+  { id: "running", label: "Running", color: "#22C55E", description: "The task is running normally. No cancellation has been requested." },
+  { id: "cancel-requested", label: "Cancel\nRequested", color: "#EAB308", description: "Cancellation was requested, by a caller, a timeout, a lost race, or a closing parent. The task will see it at its next checkpoint unless cancellation is masked." },
+  { id: "cancelling", label: "Cancelling", color: "#F97316", description: "The task acknowledged at a checkpoint and is draining: flushing buffers, closing connections. It can still await, and it can still return a value." },
+  { id: "finalizing", label: "Finalizing", color: "#EF4444", description: "The task's future has finished. Its registered finalizers run with cancellation masked." },
+  { id: "completed", label: "Completed", color: "#3B82F6", description: "The runtime publishes Completed(Cancelled(reason)), and the potential has reached zero." },
 ];
 
 const TRANSITIONS: Transition[] = [
-  { from: "running", to: "cancel-requested", label: "cancel signal received" },
-  { from: "cancel-requested", to: "cancelling", label: "task acknowledges cancel" },
-  { from: "cancelling", to: "finalizing", label: "drain budget expired" },
+  { from: "running", to: "cancel-requested", label: "cancel requested" },
+  { from: "cancel-requested", to: "cancelling", label: "acknowledged at a checkpoint" },
+  { from: "cancelling", to: "finalizing", label: "cleanup finished" },
   { from: "finalizing", to: "completed", label: "finalizers complete" },
 ];
 
@@ -57,13 +57,15 @@ export default function CancelStateMachineViz() {
   const currentState = STATES[currentIndex];
   const currentTransition = currentIndex > 0 ? TRANSITIONS[currentIndex - 1] : null;
 
-  // Cancel fuel decreases with each state
-  const fuelPercent = Math.max(0, 100 - (currentIndex / (STATES.length - 1)) * 100);
+  // Lean's cancel_potential with mask depth 0: CancelRequested = 3,
+  // Cancelling = 2, Finalizing = 1, Completed = 0. Running has none.
+  const potential = currentIndex === 0 ? null : STATES.length - 1 - currentIndex;
+  const potentialPercent = potential === null ? 100 : (potential / (STATES.length - 2)) * 100;
 
   return (
     <div className="w-full rounded-2xl border border-white/10 p-6 md:p-8 bg-slate-950">
       <h3 className="mb-1 text-lg font-semibold text-white">Cancel State Machine</h3>
-      <p className="mb-5 text-sm text-orange-400">5-state cancellation lifecycle</p>
+      <p className="mb-5 text-sm text-orange-400">Five states, one direction</p>
 
       {/* State Machine SVG */}
       <div className="overflow-x-auto">
@@ -189,24 +191,25 @@ export default function CancelStateMachineViz() {
         </svg>
       </div>
 
-      {/* Cancel Fuel Bar */}
+      {/* Cancel potential bar */}
       <div className="mx-auto mt-4 max-w-2xl">
         <div className="mb-1 flex items-center justify-between text-xs">
-          <span className="text-slate-400">Cancel Fuel</span>
-          <span className="font-mono text-white">{Math.round(fuelPercent)}%</span>
+          <span className="text-slate-400">Cancel potential (Lean model, mask = 0)</span>
+          <span className="font-mono text-white">{potential === null ? "—" : potential}</span>
         </div>
         <div className="h-2.5 w-full overflow-hidden rounded-full" style={{ background: "#0A1628" }}>
           <motion.div
             className="h-full rounded-full"
             style={{
-              background: fuelPercent > 60 ? "#22C55E" : fuelPercent > 30 ? "#F97316" : "#EF4444",
+              background: potential === null ? "#334155" : potentialPercent > 60 ? "#22C55E" : potentialPercent > 30 ? "#F97316" : "#EF4444",
             }}
-            animate={{ width: `${fuelPercent}%` }}
+            animate={{ width: `${potentialPercent}%` }}
             transition={{ duration: prefersReduced ? 0 : 0.5 }}
           />
         </div>
         <p className="mt-1 text-[10px] text-slate-600">
-          Monotonically decreasing — guarantees cancellation terminates
+          Every protocol step lowers it, so in the model a cancelled task completes in mask + 3 steps.
+          That proof is about the model: a task that never reaches a checkpoint never takes the first step.
         </p>
       </div>
 

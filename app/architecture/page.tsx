@@ -9,7 +9,7 @@ import { SyncContainer } from "@/components/sync-elements";
 import RustCodeBlock from "@/components/rust-code-block";
 import Timeline from "@/components/timeline";
 import { Tooltip } from "@/components/tooltip";
-import { changelog } from "@/lib/content";
+import { changelog, codeExample, labOracles } from "@/lib/content";
 
 const OracleDashboardViz = dynamic(() => import("@/components/viz/oracle-dashboard-viz"), { ssr: false });
 const CancelStateMachineViz = dynamic(() => import("@/components/viz/cancel-state-machine-viz"), { ssr: false });
@@ -17,65 +17,112 @@ const EProcessMonitorViz = dynamic(() => import("@/components/viz/eprocess-monit
 const MacaroonCapabilityViz = dynamic(() => import("@/components/viz/macaroon-capability-viz"), { ssr: false });
 const SagaCompensationViz = dynamic(() => import("@/components/viz/saga-compensation-viz"), { ssr: false });
 
-const CAPABILITY_TIERS = [
-  { tier: "FiberCap", color: "#64748B", desc: "Compute-only. No spawning, no I/O, no timers.", width: 100 },
-  { tier: "TaskCap", color: "#22C55E", desc: "Can spawn child tasks within its Region.", width: 200 },
-  { tier: "IoCap", color: "#3B82F6", desc: "Network, filesystem, and timer access.", width: 300 },
-  { tier: "RemoteCap", color: "#8B5CF6", desc: "Cross-machine communication and data transfer.", width: 400 },
-  { tier: "SupervisorCap", color: "#F97316", desc: "Can manage, restart, and cancel other tasks.", width: 500 },
+const CORE_TYPES = `// src/types/outcome.rs (shape, not a program)
+pub enum Outcome<T, E> {
+    Ok(T),                    // success
+    Err(E),                   // application error
+    Cancelled(CancelReason),  // cancelled, with kind, origin, and cause chain
+    Panicked(PanicPayload),   // the task panicked
+}
+// Severity: Ok < Err < Cancelled < Panicked
+
+// src/types/budget.rs
+pub struct Budget {
+    pub deadline: Option<Time>,   // absolute deadline
+    pub poll_quota: u32,          // max polls
+    pub cost_quota: Option<u64>,  // abstract cost units
+    pub priority: u8,             // 0-255
+}
+// outer.meet(inner): earlier deadline, smaller quotas, higher priority
+
+// src/cx/cx.rs (signature sketch)
+impl Cx {
+    pub fn spawn<F, Fut>(&self, f: F) -> Result<TaskHandle<Fut::Output>, SpawnError>;
+    pub fn checkpoint(&self) -> Result<(), Error>; // Err once cancel is requested
+    pub fn masked<F, R>(&self, f: F) -> R;         // defer cancellation for a closure
+    pub fn budget(&self) -> Budget;
+    pub fn is_cancel_requested(&self) -> bool;
+}`;
+
+const CAPABILITIES = [
+  { name: "SPAWN", what: "Start tasks in this context's region", color: "#22C55E" },
+  { name: "TIME", what: "Read the clock and set timers", color: "#EAB308" },
+  { name: "RANDOM", what: "Draw deterministic entropy", color: "#A855F7" },
+  { name: "IO", what: "Sockets, files, and the reactor", color: "#3B82F6" },
+  { name: "REMOTE", what: "Spawn on and talk to other nodes", color: "#F97316" },
+];
+
+const CANCEL_KINDS = [
+  "User",
+  "Timeout",
+  "Deadline",
+  "PollQuota",
+  "CostBudget",
+  "FailFast",
+  "RaceLost",
+  "LinkedExit",
+  "ParentCancelled",
+  "ResourceUnavailable",
+  "Shutdown",
+];
+
+const SCHEDULER_FACTS = [
+  "Cancel preemption is bounded. With the default cancel_streak_limit of 16, ready or timed work gets a dispatch slot within 17 steps per worker. While draining obligations or regions the bound widens to 32.",
+  "Owners pop their local queue LIFO for cache locality; thieves steal FIFO, so stolen work is older work.",
+  "!Send tasks are pinned to their owner worker on non-stealable queues.",
+  "I/O polling is a leader/follower turn: whichever worker holds the driver lock runs the reactor while the others keep scheduling.",
+  "Idle workers park on a permit-style Parker and recheck the queues after waking, which closes the lost-wakeup race.",
+  "Workers count fairness_yields and max_cancel_streak, so starvation claims can be checked against counters.",
+  "Two controls are opt-in and off by default: a Lyapunov governor that steers lane order from runtime snapshots, and an adaptive discounted-UCB1 cancel-streak selector. Measured against the fixed limit, the selector didn't win.",
 ];
 
 const TRANSITION_RULES = [
   {
     name: "SPAWN",
-    rule: "\u27E8spawn(e), \u03C3\u27E9 \u2192 \u27E8permit(id), \u03C3[id \u21A6 Running(e)]\u27E9",
-    explanation: "Spawning a task produces a Permit and registers the new task as Running in the state.",
+    rule: "R[r].state = Open  ⟹  Σ —spawn(r,t)→ Σ′,  T′[t] = Created,  R′[r].children ∪= {t}",
+    explanation: "A task can only be created in an open region, and it becomes one of that region's children.",
   },
   {
-    name: "CANCEL-PROPAGATE",
-    rule: "\u27E8cancel(r), \u03C3\u27E9 \u2192 \u27E8(), \u03C3[t.state \u21A6 CancelRequested | t \u2208 r]\u27E9",
-    explanation: "Cancelling a Region marks every task in it as CancelRequested.",
+    name: "CANCEL-REQUEST",
+    rule: "Σ —cancel(r, reason)→ Σ′,  R′[r].cancel = strengthen(R[r].cancel, reason),  ∀r′ ∈ desc(r): ParentCancelled,  ∀t ∈ children(r): CancelRequested(reason, budget)",
+    explanation: "Cancelling a region keeps the more severe reason, propagates ParentCancelled to every descendant, and marks its live tasks with a cleanup budget.",
   },
   {
-    name: "DRAIN-TICK",
-    rule: "\u27E8tick, \u03C3[t: Draining(fuel)]\u27E9 \u2192 \u27E8tick, \u03C3[t: Draining(fuel-1)]\u27E9",
-    explanation: "Each scheduler tick decrements Cancel Fuel, guaranteeing termination.",
-  },
-  {
-    name: "EFFECT-RESERVE",
-    rule: "\u27E8reserve(eff), \u03C3\u27E9 \u2192 \u27E8handle(id), \u03C3[id \u21A6 Reserved(eff)]\u27E9",
-    explanation: "Staging an effect creates a reversible reservation — not yet committed.",
+    name: "CANCEL-ACKNOWLEDGE",
+    rule: "T[t] = CancelRequested ∧ mask = 0 ∧ await(checkpoint)  ⟹  T′[t] = Cancelling,  resume(Cancelled(reason))",
+    explanation: "An unmasked task sees the cancellation at a checkpoint and starts draining.",
   },
   {
     name: "CHECKPOINT-MASKED",
-    rule: "\u27E8checkpoint, \u03C3[t: CancelRequested]\u27E9 \u2192 \u27E8Cancelled, \u03C3[t: Draining]\u27E9",
-    explanation: "If a cancel is pending at a checkpoint, the task transitions to Draining and returns Cancelled.",
+    rule: "T[t] = CancelRequested ∧ mask > 0 ∧ await(checkpoint)  ⟹  mask′ = mask − 1,  resume(Ok(()))",
+    explanation: "Masking defers cancellation, but each deferral spends one unit of a finite mask budget (capped at 64).",
   },
   {
     name: "CLOSE-CANCEL-CHILDREN",
-    rule: "\u27E8close(r), \u03C3\u27E9 \u2192 \u27E8(), \u03C3[t.state \u21A6 CancelRequested | t \u2208 children(r)]\u27E9",
-    explanation: "Closing a Region first cancels all children, cascading down the Region tree.",
+    rule: "R[r].state = Closing ∧ ∃t ∈ children(r) incomplete  ⟹  Σ —cancel(r, implicit_close)→ Σ′,  R′[r].state = Draining",
+    explanation: "A closing region cancels whatever is still running in it before it can finish.",
+  },
+  {
+    name: "RESERVE / COMMIT / ABORT",
+    rule: "reserve(o): O′[o] = Reserved  ·  commit(o): Reserved → Committed  ·  abort(o): Reserved → Aborted",
+    explanation: "Two-phase effects: reserving commits nothing, the commit performs the effect, and an abort (explicit or by drop) releases capacity with no effect.",
   },
 ];
 
-const ORACLE_LIST = [
-  { name: "TaskLeak", desc: "Detects tasks that escape their Region scope" },
-  { name: "ObligationLeak", desc: "Catches Permits/Leases dropped without consumption" },
-  { name: "CancelProtocol", desc: "Verifies 3-phase cancel contract compliance" },
-  { name: "BudgetOverrun", desc: "Flags tasks exceeding their drain budget" },
-  { name: "RegionNesting", desc: "Validates parent-child Region tree invariants" },
-  { name: "SchedulerFairness", desc: "Ensures Cancel Lane gets proper priority" },
-  { name: "QuiescenceCheck", desc: "Confirms all tasks finished before Region close" },
-  { name: "FinalizerOrder", desc: "Verifies LIFO execution order of finalizers" },
-  { name: "CapabilityEscalation", desc: "Blocks unauthorized capability upgrades" },
-  { name: "SporkInvariant", desc: "Checks fork-spawned Region consistency" },
-  { name: "DeadlockFreedom", desc: "Detects cycles in the wait-graph" },
-  { name: "ProgressGuarantee", desc: "Validates martingale progress certificates" },
-  { name: "SeedDeterminism", desc: "Ensures identical seeds reproduce identical schedules" },
-  { name: "MemoryOrdering", desc: "Checks acquire/release memory consistency" },
-  { name: "FuelExhaustion", desc: "Prevents cancel propagation past fuel=0" },
-  { name: "SupervisorPolicy", desc: "Enforces restart limits and backoff policies" },
-  { name: "EffectAtomicity", desc: "Ensures two-phase effects commit atomically" },
+const LEAN_FACTS = [
+  { value: "23 + 10", label: "Spec rules", helper: "Core lifecycle, cancel, close, obligations, join, and time, plus distributed dedup and saga rules" },
+  { value: "22", label: "Lean Step constructors", helper: "All 22 covered; JOIN and the distributed rules aren't in Lean's Step" },
+  { value: "189", label: "Lean theorems", helper: "No sorry, on Lean 4.27" },
+  { value: "6 / 6", label: "Core invariants proven", helper: "In the model. No proof that the Rust code refines it" },
+];
+
+const LEAN_INVARIANTS = [
+  "Structured concurrency: every task has exactly one owning region",
+  "Region close implies quiescence",
+  "The cancellation protocol's transitions",
+  "Race losers are drained",
+  "No obligation leaks",
+  "No ambient authority",
 ];
 
 export default function ArchitecturePage() {
@@ -93,425 +140,471 @@ export default function ArchitecturePage() {
             </h1>
           </GlitchText>
           <p className="text-xl text-slate-400 font-medium max-w-2xl mx-auto">
-            How Asupersync enforces cancel-correctness, structured concurrency, and deterministic testing.
+            Regions, the cancellation protocol, obligations, capabilities, the scheduler, and the lab
+            runtime: how each works, and where each one&apos;s guarantee stops.
           </p>
         </div>
       </section>
 
-      {/* Runtime Overview */}
+      {/* Overview */}
       <SectionShell
         id="overview"
         icon="cpu"
         eyebrow="Overview"
-        title="Runtime Architecture"
-        kicker="Asupersync&apos;s runtime is built on three pillars: Regions for structure, the Cancel Protocol for cleanup, and the Lab for testing."
+        title="The layers"
+        kicker="Tasks, actors, fibers, and remote work all hang off one region tree. Obligations are tracked per region, and the scheduler gives cancelling tasks their own lane."
       >
         <SyncContainer withPulse={true} className="p-8 md:p-12">
-          <svg viewBox="0 0 700 300" className="w-full h-auto" aria-label="Runtime architecture diagram">
-            <text x="350" y="25" textAnchor="middle" fill="#60A5FA" fontSize="13" fontWeight="bold" fontFamily="monospace">APPLICATION LAYER</text>
-            <rect x="50" y="40" width="600" height="50" rx="8" fill="#0A1628" stroke="#3B82F6" strokeWidth="1" />
-            <text x="350" y="70" textAnchor="middle" fill="#93C5FD" fontSize="11" fontFamily="monospace">Region Tree (structured concurrency scopes)</text>
+          <svg viewBox="0 0 700 360" className="w-full h-auto" aria-label="Runtime architecture diagram">
+            <text x="350" y="22" textAnchor="middle" fill="#60A5FA" fontSize="13" fontWeight="bold" fontFamily="monospace">EXECUTION TIERS</text>
+            {["Fibers", "Tasks", "Actors", "Remote"].map((label, i) => (
+              <g key={label}>
+                <rect x={50 + i * 152} y={34} width={140} height={40} rx={8} fill="#0A1628" stroke="#3B82F6" strokeWidth={1} />
+                <text x={120 + i * 152} y={59} textAnchor="middle" fill="#93C5FD" fontSize={11} fontFamily="monospace">{label}</text>
+              </g>
+            ))}
+            <line x1="350" y1="74" x2="350" y2="96" stroke="#3B82F6" strokeWidth="1" strokeDasharray="4 3" opacity="0.5" />
 
-            <line x1="350" y1="90" x2="350" y2="110" stroke="#3B82F6" strokeWidth="1" strokeDasharray="4 3" opacity="0.5" />
+            <text x="350" y="112" textAnchor="middle" fill="#60A5FA" fontSize="13" fontWeight="bold" fontFamily="monospace">REGION TREE</text>
+            <rect x="50" y="122" width="600" height="40" rx="8" fill="#0A1628" stroke="#3B82F6" strokeWidth="1" />
+            <text x="350" y="147" textAnchor="middle" fill="#93C5FD" fontSize="11" fontFamily="monospace">close(region) ⟹ quiescence of every descendant</text>
+            <line x1="350" y1="162" x2="350" y2="184" stroke="#3B82F6" strokeWidth="1" strokeDasharray="4 3" opacity="0.5" />
 
-            <text x="350" y="125" textAnchor="middle" fill="#F97316" fontSize="13" fontWeight="bold" fontFamily="monospace">CANCEL PROTOCOL</text>
-            <rect x="100" y="135" width="150" height="35" rx="6" fill="#ef4444" fillOpacity="0.1" stroke="#ef4444" strokeWidth="0.5" />
-            <text x="175" y="157" textAnchor="middle" fill="#f87171" fontSize="10" fontFamily="monospace">1. Request</text>
-            <rect x="275" y="135" width="150" height="35" rx="6" fill="#fbbf24" fillOpacity="0.1" stroke="#fbbf24" strokeWidth="0.5" />
-            <text x="350" y="157" textAnchor="middle" fill="#fbbf24" fontSize="10" fontFamily="monospace">2. Drain</text>
-            <rect x="450" y="135" width="150" height="35" rx="6" fill="#22c55e" fillOpacity="0.1" stroke="#22c55e" strokeWidth="0.5" />
-            <text x="525" y="157" textAnchor="middle" fill="#4ade80" fontSize="10" fontFamily="monospace">3. Finalize</text>
+            <text x="350" y="200" textAnchor="middle" fill="#22C55E" fontSize="13" fontWeight="bold" fontFamily="monospace">OBLIGATION REGISTRY</text>
+            <rect x="50" y="210" width="600" height="40" rx="8" fill="#0A1628" stroke="#22C55E" strokeWidth="1" strokeOpacity="0.6" />
+            <text x="350" y="235" textAnchor="middle" fill="#86EFAC" fontSize="11" fontFamily="monospace">SendPermit → send | abort · Ack → commit | nack · Lease → renew | expire</text>
+            <line x1="350" y1="250" x2="350" y2="272" stroke="#3B82F6" strokeWidth="1" strokeDasharray="4 3" opacity="0.5" />
 
-            <line x1="350" y1="170" x2="350" y2="195" stroke="#3B82F6" strokeWidth="1" strokeDasharray="4 3" opacity="0.5" />
-
-            <text x="350" y="210" textAnchor="middle" fill="#60A5FA" fontSize="13" fontWeight="bold" fontFamily="monospace">SCHEDULER</text>
-            <rect x="50" y="220" width="600" height="50" rx="8" fill="#0A1628" stroke="#3B82F6" strokeWidth="1" />
-            <text x="175" y="250" textAnchor="middle" fill="#f87171" fontSize="10" fontFamily="monospace">Cancel Lane (hi)</text>
-            <text x="350" y="250" textAnchor="middle" fill="#fbbf24" fontSize="10" fontFamily="monospace">Timed Lane (mid)</text>
-            <text x="525" y="250" textAnchor="middle" fill="#4ade80" fontSize="10" fontFamily="monospace">Ready Lane (lo)</text>
+            <text x="350" y="288" textAnchor="middle" fill="#60A5FA" fontSize="13" fontWeight="bold" fontFamily="monospace">SCHEDULER</text>
+            <rect x="50" y="298" width="600" height="48" rx="8" fill="#0A1628" stroke="#3B82F6" strokeWidth="1" />
+            <text x="175" y="327" textAnchor="middle" fill="#f87171" fontSize="10" fontFamily="monospace">Cancel lane</text>
+            <text x="350" y="327" textAnchor="middle" fill="#fbbf24" fontSize="10" fontFamily="monospace">Timed lane (EDF)</text>
+            <text x="525" y="327" textAnchor="middle" fill="#4ade80" fontSize="10" fontFamily="monospace">Ready lane</text>
           </svg>
         </SyncContainer>
       </SectionShell>
 
-      {/* Structured Concurrency */}
+      {/* Regions */}
       <SectionShell
         id="regions"
         icon="blocks"
-        eyebrow="Core Model"
-        title="Structured Concurrency"
-        kicker="Every task lives inside a Region. Regions form a tree. When a parent Region closes, all children are cancelled — automatically."
+        eyebrow="Core model"
+        title="Regions and scopes"
+        kicker="Every task belongs to a region. A region doesn't finish closing until its children have finished, its finalizers have run, and its registered obligations are resolved."
       >
         <div className="space-y-6">
-          <SyncContainer className="p-6 md:p-8">
-            <RustCodeBlock
-              code={`// Regions scope task lifetimes
-Region::open(cx, "server", async |cx| {
-    // Child tasks are bound to this Region
-    cx.spawn("worker-1", handle_requests());
-    cx.spawn("worker-2", process_queue());
-
-    // When this Region closes, workers are cancelled
-    // via the cancel protocol (not silently dropped)
-    cx.shutdown_signal().await;
-}).await`}
-              title="regions.rs"
-            />
+          <SyncContainer className="p-1 md:p-2 bg-black/40">
+            <RustCodeBlock code={codeExample} title="src/main.rs" />
           </SyncContainer>
-          <p className="text-slate-400 leading-relaxed">
-            Unlike Tokio&apos;s <code className="text-blue-400 font-mono">tokio::spawn</code> which creates globally-scoped tasks,
-            Asupersync tasks are always scoped to a Region. This eliminates orphaned futures — if you can&apos;t see
-            the task, it can&apos;t outlive you.
-          </p>
-        </div>
-      </SectionShell>
-
-      {/* Cancel Protocol */}
-      <SectionShell
-        id="cancel"
-        icon="shield"
-        eyebrow="Safety"
-        title="Cancel Protocol"
-        kicker="Three phases ensure resources are always cleaned up, even during cancellation."
-      >
-        <div className="grid gap-4 md:grid-cols-3">
-          {[
-            { phase: "1. Request", color: "#ef4444", desc: "Cancel signal sent. Task sees CancelRequested on its Cx. Can begin graceful shutdown." },
-            { phase: "2. Drain", color: "#fbbf24", desc: "Task gets budgeted time to finish in-flight work. Flush buffers, close connections, release locks." },
-            { phase: "3. Finalize", color: "#22c55e", desc: "Registered finalizers run in LIFO order. Like defer in Go, but integrated with the cancel protocol." },
-          ].map((p) => (
-            <div key={p.phase} className="rounded-2xl border border-white/5 bg-white/[0.02] p-6">
-              <div className="text-sm font-black mb-3" style={{ color: p.color }}>{p.phase}</div>
-              <p className="text-sm text-slate-400 leading-relaxed">{p.desc}</p>
-            </div>
-          ))}
-        </div>
-      </SectionShell>
-
-      {/* ================================================================
-          CAPABILITY TIERS
-          ================================================================ */}
-      <SectionShell
-        id="capability-tiers"
-        icon="lock"
-        eyebrow="Security"
-        title="Capability Tiers"
-        kicker="Five hierarchical permission levels enforce the principle of least authority. Every task gets exactly the permissions it needs — nothing more."
-      >
-        <div className="space-y-6">
-          {/* SVG Tier Diagram */}
-          <SyncContainer withPulse={true} accentColor="#8B5CF6" className="p-6 md:p-10 bg-black/40">
-            <svg viewBox="0 0 600 280" className="w-full h-auto" aria-label="Capability tier hierarchy diagram">
-              {CAPABILITY_TIERS.map((tier, i) => {
-                const y = 20 + i * 52;
-                const x = (600 - tier.width) / 2;
-                return (
-                  <g key={tier.tier}>
-                    <rect
-                      x={x}
-                      y={y}
-                      width={tier.width}
-                      height={38}
-                      rx={8}
-                      fill={`${tier.color}15`}
-                      stroke={tier.color}
-                      strokeWidth={1.5}
-                    />
-                    <text
-                      x={300}
-                      y={y + 16}
-                      textAnchor="middle"
-                      fill={tier.color}
-                      fontSize={12}
-                      fontWeight={700}
-                      fontFamily="monospace"
-                    >
-                      {tier.tier}
-                    </text>
-                    <text
-                      x={300}
-                      y={y + 30}
-                      textAnchor="middle"
-                      fill="#64748B"
-                      fontSize={8}
-                      fontFamily="inherit"
-                    >
-                      {tier.desc}
-                    </text>
-                    {i < CAPABILITY_TIERS.length - 1 && (
-                      <line
-                        x1={300}
-                        y1={y + 38}
-                        x2={300}
-                        y2={y + 52}
-                        stroke="#334155"
-                        strokeWidth={1}
-                        strokeDasharray="3 3"
-                      />
-                    )}
-                  </g>
-                );
-              })}
-            </svg>
-          </SyncContainer>
-
-          <div className="space-y-4 text-slate-400 leading-relaxed">
+          <div className="grid gap-4 md:grid-cols-2 text-slate-400 leading-relaxed">
             <p>
-              Each <Tooltip term="Capability Tier">capability tier</Tooltip> extends the one below it.
-              A task with <Tooltip term="FiberCap">FiberCap</Tooltip> can only compute — it cannot spawn,
-              perform I/O, or set timers. <Tooltip term="IoCap">IoCap</Tooltip> adds network and filesystem
-              access. At the top, SupervisorCap can manage and restart other tasks.
+              <code className="text-blue-400 font-mono">cx.spawn</code> puts the task in the calling context&apos;s{" "}
+              <Tooltip term="Region">region</Tooltip>. <code className="text-blue-400 font-mono">cx.scope()</code> gives you a{" "}
+              <Tooltip term="Scope">Scope</Tooltip> for that region, and{" "}
+              <code className="text-blue-400 font-mono">scope.region(…)</code> opens a child region that must reach
+              quiescence before it returns. <code className="text-blue-400 font-mono">JoinSet</code> owns dynamic fan-out.
+              Tasks spawned through a <code className="text-blue-400 font-mono">RuntimeHandle</code> belong to the root
+              region and are drained at shutdown.
             </p>
             <p>
-              This hierarchy ensures that if a task is compromised or buggy, its blast radius is limited to
-              its granted capabilities. A compute-only fiber cannot exfiltrate data over the network.
-              An I/O task cannot restart other tasks.
+              The &ldquo;no orphans&rdquo; property comes from the shape of the API, region accounting, and runtime
+              and oracle checks, not from discipline. It also isn&apos;t a claim that Rust&apos;s type system proves
+              every adapter path. Region memory uses generation-checked handles, reclaimed when the region
+              closes; there&apos;s no public allocation API for it yet.
             </p>
           </div>
         </div>
       </SectionShell>
 
-      {/* ================================================================
-          FORMAL VERIFICATION
-          ================================================================ */}
+      {/* Core types */}
       <SectionShell
-        id="formal-semantics"
-        icon="fileText"
-        eyebrow="Formal Foundations"
-        title="Small-Step Semantics"
-        kicker="35 transition rules define every possible async state change. Each rule is mechanized in Lean 4 for machine-checked correctness."
+        id="core-types"
+        icon="braces"
+        eyebrow="Core types"
+        title="Outcome, Budget, Cx"
+        kicker="Three types carry most of the model: a four-valued result, a budget that composes, and the context every async function receives."
       >
-        <div className="space-y-6">
-          <p className="text-slate-400 leading-relaxed">
-            Think of <Tooltip term="Small-Step Semantics">small-step semantics</Tooltip> like a recipe card
-            for the runtime. Each <Tooltip term="Transition Rule">transition rule</Tooltip> says: &ldquo;If the
-            system is in state X, then one computation step produces state Y.&rdquo; By chaining rules together,
-            you can trace any execution from start to finish — and prove that no step can violate safety guarantees.
-          </p>
+        <SyncContainer className="p-1 md:p-2 bg-black/40">
+          <RustCodeBlock code={CORE_TYPES} title="core types" />
+        </SyncContainer>
+      </SectionShell>
 
-          {/* Transition Rules Display */}
-          <div className="space-y-3">
-            {TRANSITION_RULES.map((rule) => (
-              <div
-                key={rule.name}
-                className="rounded-xl border border-white/5 bg-white/[0.02] p-5"
-              >
-                <div className="flex items-center gap-3 mb-2">
-                  <span className="text-xs font-black uppercase tracking-[0.2em] text-blue-400">
-                    {rule.name}
-                  </span>
-                </div>
-                <code className="block text-sm font-mono text-slate-300 mb-2 overflow-x-auto">
-                  {rule.rule}
-                </code>
-                <p className="text-xs text-slate-500 leading-relaxed">
-                  {rule.explanation}
-                </p>
+      {/* Cancel protocol */}
+      <SectionShell
+        id="cancel"
+        icon="shield"
+        eyebrow="Cancellation"
+        title="The cancellation protocol"
+        kicker="Request, drain, finalize, complete. Cooperative all the way down: the runtime never stops a task that won't check in."
+      >
+        <div className="space-y-8">
+          <div className="grid gap-4 md:grid-cols-4">
+            {[
+              { phase: "1. Request", color: "#ef4444", desc: "The request propagates down the region tree. Each task is marked CancelRequested with a reason and a cleanup budget." },
+              { phase: "2. Drain", color: "#fbbf24", desc: "At its next checkpoint the task sees Cancelled and runs its own cleanup. It can still await, and it can still return a value." },
+              { phase: "3. Finalize", color: "#22c55e", desc: "Registered finalizers run with cancellation masked. Region finalizers run LIFO." },
+              { phase: "4. Complete", color: "#3b82f6", desc: "The runtime publishes the outcome: Cancelled(reason) when cancellation won, or the task's own value if it finished." },
+            ].map((p) => (
+              <div key={p.phase} className="rounded-2xl border border-white/5 bg-white/[0.02] p-6">
+                <div className="text-sm font-black mb-3" style={{ color: p.color }}>{p.phase}</div>
+                <p className="text-sm text-slate-400 leading-relaxed">{p.desc}</p>
               </div>
             ))}
           </div>
 
-          <p className="text-sm text-slate-500">
-            These 6 rules are a sample — the full system has 35 rules covering checkpoint, commit, rollback,
-            supervisor restart, and more. See the{" "}
-            <Link href="/spec-explorer" className="text-blue-400 hover:text-blue-300 underline underline-offset-2">
-              Spec Explorer
-            </Link>{" "}
-            for the complete formal specification.
+          <SyncContainer withPulse={true} accentColor="#F97316" className="p-1 md:p-2 bg-black/40 shadow-2xl shadow-orange-900/20">
+            <CancelStateMachineViz />
+          </SyncContainer>
+
+          <div className="grid gap-6 md:grid-cols-2 text-slate-400 leading-relaxed">
+            <div className="space-y-4">
+              <p>
+                <strong className="text-white">Reasons are ordered.</strong> A{" "}
+                <Tooltip term="CancelReason">CancelReason</Tooltip> carries one of eleven kinds, from least to most
+                severe, and when two requests meet, the more severe kind wins. Cleanup budgets shrink as severity
+                rises, and the error from <code className="text-orange-300 font-mono">cx.checkpoint()</code> carries the
+                reason, so a joiner can tell why a task stopped.
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {CANCEL_KINDS.map((kind) => (
+                  <span key={kind} className="rounded-md border border-orange-500/20 bg-orange-500/5 px-2 py-1 text-[11px] font-mono text-orange-300">
+                    {kind}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-4">
+              <p>
+                <strong className="text-white">Bounds are conditional.</strong> Stock operations publish what they
+                can promise through a responsiveness registry: a finite number of polls or checkpoints under stated
+                assumptions, or a typed refusal for masked, blocking, external, or unknown work. Budgets are
+                sufficient conditions only where a concrete bound exists.
+              </p>
+              <p>
+                In the Lean model, a cancelled task completes in exactly mask + 3 protocol steps (the{" "}
+                <Tooltip term="Cancel Potential">cancel potential</Tooltip>). On the production runtime, budgets are
+                advisory and <code className="text-orange-300 font-mono">Runtime::shutdown_timeout</code> bounds how long you wait.
+              </p>
+            </div>
+          </div>
+        </div>
+      </SectionShell>
+
+      {/* Obligations */}
+      <SectionShell
+        id="obligations"
+        icon="package"
+        eyebrow="Obligations"
+        title="What the runtime counts"
+        kicker="Permits, acks, and leases taken through a runtime-built Cx are recorded in an obligation table and must be resolved before their region can close."
+      >
+        <div className="grid gap-6 md:grid-cols-3">
+          <div className="rounded-2xl border border-green-500/20 bg-green-500/[0.03] p-6">
+            <div className="text-xs font-black uppercase tracking-[0.2em] text-green-400 mb-3">Tracked (ObligationKind)</div>
+            <ul className="space-y-2 text-sm text-slate-400 leading-relaxed">
+              <li><span className="font-mono text-green-300">SendPermit</span>: mpsc, oneshot, and broadcast reservations</li>
+              <li><span className="font-mono text-green-300">SemaphorePermit</span>: released when capacity returns</li>
+              <li><span className="font-mono text-green-300">Ack</span>: acknowledgement for a received message</li>
+              <li><span className="font-mono text-green-300">Lease</span>: remote leases, renewed or expired</li>
+              <li><span className="font-mono text-green-300">IoOp</span>: a pending I/O operation</li>
+              <li><span className="font-mono text-green-300">Transaction</span>: an open database transaction, rolled back on drain if never committed</li>
+            </ul>
+          </div>
+          <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-6">
+            <div className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 mb-3">Not obligations</div>
+            <ul className="space-y-2 text-sm text-slate-400 leading-relaxed">
+              <li>Mutex and RwLock guards, which release on drop and have their own queue-cleanup tests</li>
+              <li>Session-channel permits, which are standalone typestate tokens the oracles don&apos;t see</li>
+              <li>Spork name leases, which panic if dropped unresolved but aren&apos;t checked at region close yet</li>
+              <li>Anything taken through a Cx built without a runtime</li>
+            </ul>
+          </div>
+          <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-6">
+            <div className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 mb-3">How leaks surface</div>
+            <p className="text-sm text-slate-400 leading-relaxed">
+              A permit that escapes its task through <code className="font-mono text-green-300">mem::forget</code> is reported
+              by the obligation_leak oracle by kind and holder. A task parked while holding one is flagged as a{" "}
+              <Tooltip term="Futurelock">futurelock</Tooltip>. An opt-in Shiryaev–Roberts monitor can watch
+              obligation ages on the production runtime.
+            </p>
+          </div>
+        </div>
+      </SectionShell>
+
+      {/* Capabilities */}
+      <SectionShell
+        id="capabilities"
+        icon="lock"
+        eyebrow="Capabilities"
+        title="The capability row"
+        kicker="A Cx carries a type-level record of five effects. You can narrow it; you can't widen it back."
+      >
+        <div className="space-y-8">
+          <div className="grid gap-3 sm:grid-cols-5">
+            {CAPABILITIES.map((cap) => (
+              <div
+                key={cap.name}
+                className="rounded-2xl border p-5 text-center"
+                style={{ borderColor: `${cap.color}40`, backgroundColor: `${cap.color}0d` }}
+              >
+                <div className="font-mono font-black text-sm mb-2" style={{ color: cap.color }}>{cap.name}</div>
+                <div className="text-xs text-slate-400 leading-relaxed">{cap.what}</div>
+              </div>
+            ))}
+          </div>
+          <div className="grid gap-6 md:grid-cols-2 text-slate-400 leading-relaxed">
+            <p>
+              <code className="text-blue-400 font-mono">CapSet&lt;SPAWN, TIME, RANDOM, IO, REMOTE&gt;</code> is a set of
+              const-generic flags. <code className="text-blue-400 font-mono">Cx::restrict</code> narrows a context to a
+              subset, and sealed traits such as <code className="text-blue-400 font-mono">HasSpawn</code> and{" "}
+              <code className="text-blue-400 font-mono">HasIo</code> let a function demand an effect in its signature.
+              Reinstalling a narrowed context with <code className="text-blue-400 font-mono">Cx::set_current</code> keeps
+              its restrictions.
+            </p>
+            <p>
+              The boundary has documented gaps. Plain I/O entry points like{" "}
+              <code className="text-blue-400 font-mono">TcpStream::connect</code> check the calling task&apos;s context and
+              refuse with ASUP-E009 without the IO capability, but threads outside the runtime aren&apos;t affected,
+              and host-boundary helpers such as OS entropy for temp-file names stay outside the deterministic
+              guarantee.
+            </p>
+          </div>
+
+          <SyncContainer withPulse={true} accentColor="#14B8A6" className="p-1 md:p-2 bg-black/40 shadow-2xl shadow-teal-900/20">
+            <MacaroonCapabilityViz />
+          </SyncContainer>
+          <p className="text-slate-400 leading-relaxed">
+            On top of the static row, a context can carry a <Tooltip term="Macaroon">macaroon</Tooltip>: an
+            HMAC-SHA256 chained bearer token with eight caveat types (<code className="text-teal-400 font-mono">TimeBefore</code>,{" "}
+            <code className="text-teal-400 font-mono">TimeAfter</code>, <code className="text-teal-400 font-mono">RegionScope</code>,{" "}
+            <code className="text-teal-400 font-mono">TaskScope</code>, <code className="text-teal-400 font-mono">MaxUses</code>,{" "}
+            <code className="text-teal-400 font-mono">ResourceScope</code>, <code className="text-teal-400 font-mono">RateLimit</code>,{" "}
+            <code className="text-teal-400 font-mono">Custom</code>), plus third-party caveats with discharges.{" "}
+            <code className="text-teal-400 font-mono">Cx::attenuate</code> adds a caveat. Having the runtime check spawns
+            against a token is opt-in through <code className="text-teal-400 font-mono">with_spawn_authorization_key</code>.
           </p>
         </div>
       </SectionShell>
 
-      {/* ================================================================
-          ORACLE & LAB TESTING
-          ================================================================ */}
+      {/* Scheduler */}
+      <SectionShell
+        id="scheduler"
+        icon="activity"
+        eyebrow="Scheduler"
+        title="Three lanes, work stealing"
+        kicker="Cancelling tasks run first so cleanup isn't starved, deadline work runs earliest-deadline-first, and everything else waits its turn, within explicit bounds."
+      >
+        <div className="grid gap-6 lg:grid-cols-12">
+          <div className="lg:col-span-4 space-y-3">
+            {[
+              { lane: "Cancel lane", color: "#ef4444", desc: "Tasks in cancellation states. Priority 200–255." },
+              { lane: "Timed lane", color: "#fbbf24", desc: "Deadline-driven tasks, earliest deadline first." },
+              { lane: "Ready lane", color: "#22c55e", desc: "Everything else runnable, at default priority." },
+            ].map((l) => (
+              <div key={l.lane} className="rounded-2xl border border-white/5 bg-white/[0.02] p-5">
+                <div className="text-sm font-black mb-1" style={{ color: l.color }}>{l.lane}</div>
+                <p className="text-sm text-slate-400">{l.desc}</p>
+              </div>
+            ))}
+          </div>
+          <ul className="lg:col-span-8 space-y-3">
+            {SCHEDULER_FACTS.map((fact) => (
+              <li key={fact} className="flex gap-3 text-slate-400 leading-relaxed">
+                <span className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+                <span>{fact}</span>
+              </li>
+            ))}
+            <li className="flex gap-3 text-slate-400 leading-relaxed">
+              <span className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+              <span>
+                Runtime state can be split into independently locked shards (tasks, regions, obligations,
+                instrumentation, config) with <code className="text-blue-300 font-mono">with_sharded_state(true)</code>.
+                The default keeps it behind one lock.
+              </span>
+            </li>
+          </ul>
+        </div>
+      </SectionShell>
+
+      {/* Formal semantics */}
+      <SectionShell
+        id="formal-semantics"
+        icon="fileText"
+        eyebrow="Formal foundations"
+        title="What's actually been proved"
+        kicker="A small-step operational semantics, a Lean project that checks six invariants of it, and TLA+ export for recorded traces. Precisely scoped, because the gap between model and code matters."
+      >
+        <div className="space-y-8">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {LEAN_FACTS.map((f) => (
+              <div key={f.label} className="rounded-2xl border border-white/5 bg-white/[0.02] p-6">
+                <div className="text-3xl font-black text-blue-400 tabular-nums mb-1">{f.value}</div>
+                <div className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 mb-2">{f.label}</div>
+                <p className="text-xs text-slate-500 leading-relaxed">{f.helper}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-2">
+            <div>
+              <h3 className="text-lg font-black text-white mb-3">The six invariants Lean checks</h3>
+              <ul className="space-y-2">
+                {LEAN_INVARIANTS.map((inv) => (
+                  <li key={inv} className="flex gap-3 text-slate-400">
+                    <span className="text-blue-400">✓</span>
+                    <span>{inv}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="space-y-4 text-slate-400 leading-relaxed">
+              <p>
+                These are theorems about the abstract model, linked to executable tests. The production Rust
+                runtime hasn&apos;t been proved to refine that model, so this isn&apos;t a mechanized proof of the
+                executor, the adapters, the protocol implementations, or the network transports.
+              </p>
+              <p>
+                Lab traces can be exported as TLA+ behaviors, and a test runs TLC on a real trace (and on a planted
+                violation it must reject). TLC checks the recorded behavior, not a parametric model of the runtime.
+              </p>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-lg font-black text-white mb-4">A few of the <Tooltip term="Transition Rule">rules</Tooltip></h3>
+            <div className="space-y-3">
+              {TRANSITION_RULES.map((rule) => (
+                <div key={rule.name} className="rounded-xl border border-white/5 bg-white/[0.02] p-5">
+                  <div className="text-xs font-black uppercase tracking-[0.2em] text-blue-400 mb-2">{rule.name}</div>
+                  <code className="block text-sm font-mono text-slate-300 mb-2 overflow-x-auto whitespace-pre-wrap">{rule.rule}</code>
+                  <p className="text-xs text-slate-500 leading-relaxed">{rule.explanation}</p>
+                </div>
+              ))}
+            </div>
+            <p className="mt-4 text-sm text-slate-500">
+              The full rule set, with proof sketches and the mapping to runtime state, is in the{" "}
+              <Link href="/spec-explorer" className="text-blue-400 hover:text-blue-300 underline underline-offset-2">
+                formal semantics
+              </Link>{" "}
+              document.
+            </p>
+          </div>
+        </div>
+      </SectionShell>
+
+      {/* Oracles */}
       <SectionShell
         id="oracles"
         icon="sparkles"
-        eyebrow="Testing Infrastructure"
-        title="17 Test Oracles"
-        kicker="The Lab runtime ships with 17 independent correctness monitors. Each oracle watches for a specific class of concurrency bug."
+        eyebrow="Lab runtime"
+        title="24 oracles, 9 of them fed"
+        kicker="Every LabRuntime report runs the oracle registry. Nine oracles are fed from runtime state today; the rest are registered but nothing feeds them yet."
       >
         <div className="space-y-6">
           <SyncContainer withPulse={true} accentColor="#8B5CF6" className="p-1 md:p-2 bg-black/40 shadow-2xl shadow-purple-900/20">
             <OracleDashboardViz />
           </SyncContainer>
 
-          <p className="text-slate-400 leading-relaxed">
-            Each <Tooltip term="Test Oracle">test oracle</Tooltip> is an independent auditor.
-            When you run a <Tooltip term="Lab Runtime">Lab</Tooltip> test, all 17 oracles are active simultaneously — checking
-            for resource leaks, protocol violations, budget overruns, and more.
-            Combined with <Tooltip term="DPOR">DPOR</Tooltip> (think of it as a maze solver that only
-            explores paths that lead to different outcomes), the Lab systematically finds bugs that
-            random testing would miss.
-          </p>
-
-          {/* Oracle List */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            {ORACLE_LIST.map((oracle) => (
+            {labOracles.map((oracle) => (
               <div
                 key={oracle.name}
                 className="flex items-start gap-3 rounded-lg border border-white/5 bg-white/[0.02] px-4 py-3"
               >
-                <div className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-purple-500" />
+                <div className={`mt-1 h-2 w-2 shrink-0 rounded-full ${oracle.fed ? "bg-purple-500" : "bg-slate-700"}`} />
                 <div>
-                  <span className="text-xs font-bold text-purple-300">{oracle.name}</span>
-                  <span className="text-xs text-slate-500 ml-2">{oracle.desc}</span>
+                  <span className={`text-xs font-bold font-mono ${oracle.fed ? "text-purple-300" : "text-slate-500"}`}>
+                    {oracle.name}
+                  </span>
+                  {!oracle.fed && <span className="ml-2 text-[10px] uppercase tracking-wider text-slate-600">not fed</span>}
+                  <span className="block text-xs text-slate-500 mt-0.5">{oracle.description}</span>
                 </div>
               </div>
             ))}
           </div>
+          <p className="text-sm text-slate-500">
+            Four more FABRIC messaging oracles exist behind the <code className="font-mono">messaging-fabric</code> feature.
+          </p>
         </div>
       </SectionShell>
 
-      {/* ================================================================
-          CANCEL STATE MACHINE
-          ================================================================ */}
-      <SectionShell
-        id="cancel-state-machine"
-        icon="activity"
-        eyebrow="Cancel Lifecycle"
-        title="State Machine"
-        kicker="Five states, four transitions, and Cancel Fuel that guarantees termination. Walk through the full cancellation lifecycle."
-      >
-        <div className="space-y-6">
-          <SyncContainer withPulse={true} accentColor="#F97316" className="p-1 md:p-2 bg-black/40 shadow-2xl shadow-orange-900/20">
-            <CancelStateMachineViz />
-          </SyncContainer>
-
-          <div className="space-y-4 text-slate-400 leading-relaxed">
-            <p>
-              <Tooltip term="Cancel Fuel">Cancel Fuel</Tooltip> is the key invariant. It&apos;s a counter that
-              strictly decreases with each step of cancel propagation — like a rocket with a finite fuel tank.
-              The formal proof is a <Tooltip term="Supermartingale">supermartingale</Tooltip>: a mathematical
-              sequence that, on average, can only go down. This guarantees that cancellation always terminates,
-              even in adversarial workloads.
-            </p>
-            <p>
-              The five states — Running, CancelRequested, Cancelling (Drain), Finalizing, and Completed —
-              form a strict total order. A task can only move forward through these states, never backward.
-              Combined with the <Tooltip term="Budget Algebra">budget algebra</Tooltip> that composes
-              nested region budgets, this gives Asupersync its cancel-correctness guarantee.
-            </p>
-          </div>
-        </div>
-      </SectionShell>
-
-      {/* ================================================================
-          MACAROON CAPABILITY ATTENUATION
-          ================================================================ */}
-      <SectionShell
-        id="macaroon-capabilities"
-        icon="lock"
-        eyebrow="Security"
-        title="Macaroon Attenuation"
-        kicker="Capabilities are bearer tokens with 8 caveat predicates. Anyone can add restrictions — nobody can remove them. Delegation is safe by construction."
-      >
-        <div className="space-y-6">
-          <SyncContainer withPulse={true} accentColor="#14B8A6" className="p-1 md:p-2 bg-black/40 shadow-2xl shadow-teal-900/20">
-            <MacaroonCapabilityViz />
-          </SyncContainer>
-
-          <div className="space-y-4 text-slate-400 leading-relaxed">
-            <p>
-              Inspired by Google&apos;s Macaroons paper, Asupersync&apos;s capabilities use a <Tooltip term="Macaroon">decentralized attenuation model</Tooltip>.
-              When you delegate a capability to a child task, you can restrict it by adding <em>caveats</em> — but you can
-              never widen an existing capability. This makes delegation inherently safe: you don&apos;t need a central authority
-              to verify that a delegated token is valid.
-            </p>
-            <p>
-              The 8 caveat predicates cover time bounds (<code className="text-teal-400 font-mono">TimeBefore</code>, <code className="text-teal-400 font-mono">TimeAfter</code>),
-              spatial scoping (<code className="text-teal-400 font-mono">RegionScope</code>, <code className="text-teal-400 font-mono">TaskScope</code>),
-              usage limits (<code className="text-teal-400 font-mono">MaxUses</code>, <code className="text-teal-400 font-mono">RateLimit</code>),
-              resource patterns (<code className="text-teal-400 font-mono">ResourceScope</code>), and a <code className="text-teal-400 font-mono">Custom</code> escape
-              hatch for application-specific restrictions.
-            </p>
-          </div>
-        </div>
-      </SectionShell>
-
-      {/* ================================================================
-          E-PROCESS MONITORING
-          ================================================================ */}
+      {/* E-process */}
       <SectionShell
         id="eprocess-monitoring"
         icon="activity"
-        eyebrow="Statistical Testing"
-        title="E-Process Monitoring"
-        kicker="Anytime-valid invariant monitoring via Ville's inequality. Peek at any time, reject the instant evidence is strong enough — no p-hacking penalty."
+        eyebrow="Statistical testing"
+        title="E-process monitoring"
+        kicker="Summarize oracle verdicts across many seeds with a test you can check after every run without inflating the false-alarm rate."
       >
         <div className="space-y-6">
           <SyncContainer withPulse={true} accentColor="#A855F7" className="p-1 md:p-2 bg-black/40 shadow-2xl shadow-purple-900/20">
             <EProcessMonitorViz />
           </SyncContainer>
 
-          <div className="space-y-4 text-slate-400 leading-relaxed">
+          <div className="grid gap-6 md:grid-cols-2 text-slate-400 leading-relaxed">
             <p>
-              Traditional statistical tests require a fixed sample size: you commit to N observations upfront, then compute
-              a p-value. Peeking at intermediate results invalidates the guarantee. <Tooltip term="E-Process">E-processes</Tooltip> solve
-              this using a betting martingale: <code className="text-purple-400 font-mono">E_t = E_(t-1) &times; (1 + &lambda; &times; (X_t - p₀))</code>.
+              A fixed-sample test is invalidated if you peek early. An <Tooltip term="E-Process">e-process</Tooltip>{" "}
+              isn&apos;t: it&apos;s a betting martingale, <code className="text-purple-400 font-mono">E_t = E_(t-1) × (1 + λ(X_t − p₀))</code>,
+              and by Ville&apos;s inequality the chance it ever exceeds 1/α under the null is at most α. The standard
+              monitor watches task_leak, obligation_leak, and quiescence with λ = 0.5, p₀ = 0.001, and α = 0.05.
             </p>
             <p>
-              Via <strong className="text-purple-300">Ville&apos;s inequality</strong>, if the E-value ever
-              exceeds 1/&alpha;, you know with mathematical certainty that the null hypothesis is false — regardless of when
-              you checked. The Lab runtime monitors three critical invariants (task leak, obligation leak, quiescence)
-              this way, with bet size &lambda;=0.5 and null rate p₀=0.001.
+              What it doesn&apos;t do is find bugs on its own. Each observation is an oracle&apos;s pass/fail verdict for
+              one run, and a lab run is deterministic, so the e-process can only reject an invariant some oracle has
+              already flagged. It summarizes violation rates across seeds with an anytime-valid bound.
             </p>
           </div>
         </div>
       </SectionShell>
 
-      {/* ================================================================
-          SAGA COMPENSATION
-          ================================================================ */}
+      {/* Sagas */}
       <SectionShell
         id="saga-compensation"
         icon="globe"
-        eyebrow="Effect Safety"
-        title="Saga Compensation"
-        kicker="16 operation kinds, CALM-optimized coordination barriers, and automatic LIFO rollback. Distributed operations that unwind cleanly on failure."
+        eyebrow="Distributed"
+        title="Sagas and CALM"
+        kicker="Two separate pieces: compensating sagas for remote workflows, and a planner that uses CALM analysis to batch obligation steps between coordination barriers."
       >
         <div className="space-y-6">
           <SyncContainer withPulse={true} accentColor="#10B981" className="p-1 md:p-2 bg-black/40 shadow-2xl shadow-emerald-900/20">
             <SagaCompensationViz />
           </SyncContainer>
 
-          <div className="space-y-4 text-slate-400 leading-relaxed">
+          <div className="grid gap-6 md:grid-cols-2 text-slate-400 leading-relaxed">
             <p>
-              Multi-step operations (create account → send email → charge card) are modeled as <Tooltip term="Saga">Sagas</Tooltip>.
-              Each step has a forward action and a compensating action. If any step fails or cancellation arrives,
-              completed steps are unwound in LIFO order — the last completed step compensates first.
+              <code className="text-emerald-300 font-mono">remote::Saga</code> records a forward action and a compensation
+              for each step. If a later step fails, completed steps are compensated in reverse order. It sits next to
+              the remote runtime&apos;s region-owned spawns, obligation-backed leases, and idempotency store.
             </p>
             <p>
-              What makes this unique is <Tooltip term="CALM Analysis">CALM analysis</Tooltip>. The Saga engine
-              classifies each of its 16 operation kinds as <Tooltip term="Monotone Operation">monotone</Tooltip> (order-independent,
-              like Reserve and Send) or non-monotone (barrier-required, like Commit and Release).
-              Consecutive <Tooltip term="Monotone Operation">monotone operations</Tooltip> are batched without
-              any <Tooltip term="Coordination Barrier">coordination barriers</Tooltip> — synchronization is inserted
-              only where the math demands it.
+              Separately, the obligation saga model has 16 operation kinds. <Tooltip term="CALM Analysis">CALM analysis</Tooltip>{" "}
+              marks 7 as monotone (Reserve, Send, Acquire, Renew, Delegate, CrdtMerge, CancelRequest) and 9 as not.{" "}
+              <code className="text-emerald-300 font-mono">MonotoneSagaExecutor</code> merges each run of monotone steps
+              with a lattice join and puts a <Tooltip term="Coordination Barrier">barrier</Tooltip> before every
+              non-monotone one. A sheaf-style consistency checker for saga observations exists as an API; nothing runs
+              it automatically.
             </p>
           </div>
         </div>
       </SectionShell>
 
-      {/* Development Timeline */}
       <SectionShell
         id="timeline"
         icon="clock"
-        eyebrow="Development"
-        title="Build Timeline"
-        kicker="From formal proofs to published crate."
+        eyebrow="Roadmap"
+        title="Where things stand"
+        kicker="From the upstream README. Partial means partial."
       >
         <Timeline items={changelog} />
       </SectionShell>
 
-      {/* CTA */}
       <div className="mx-auto max-w-7xl px-6 py-20 flex flex-col sm:flex-row gap-4 justify-center">
         <Link href="/showcase" className="group inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-6 py-3 text-sm font-bold text-slate-300 hover:border-blue-500/30 hover:text-white transition-all">
-          Interactive Demos
+          Interactive demos
           <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
         </Link>
         <Link href="/getting-started" className="group inline-flex items-center gap-2 rounded-full bg-blue-500 px-6 py-3 text-sm font-bold text-white hover:bg-blue-400 transition-all active:scale-95">
-          Get Started
+          Get started
           <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
         </Link>
       </div>

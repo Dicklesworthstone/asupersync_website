@@ -2,67 +2,38 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "@/components/motion";
+import { labOracles } from "@/lib/content";
+
+type OracleStatus = "idle" | "checking" | "pass" | "fail" | "unfed";
 
 interface Oracle {
   name: string;
   short: string;
-  status: "idle" | "checking" | "pass" | "fail";
+  fed: boolean;
+  example?: string;
+  status: OracleStatus;
 }
 
-const ORACLES_INIT: Omit<Oracle, "status">[] = [
-  { name: "TaskLeak", short: "Tasks escaping scope" },
-  { name: "ObligationLeak", short: "Dropped Permits/Leases" },
-  { name: "CancelProtocol", short: "3-phase compliance" },
-  { name: "BudgetOverrun", short: "Exceeded drain time" },
-  { name: "RegionNesting", short: "Tree invariants" },
-  { name: "SchedulerFairness", short: "Lane priority" },
-  { name: "QuiescenceCheck", short: "Region silence" },
-  { name: "FinalizerOrder", short: "LIFO execution" },
-  { name: "CapabilityEscalation", short: "Permission bounds" },
-  { name: "SporkInvariant", short: "Fork consistency" },
-  { name: "DeadlockFreedom", short: "Wait-graph cycles" },
-  { name: "ProgressGuarantee", short: "Martingale cert" },
-  { name: "SeedDeterminism", short: "Replay fidelity" },
-  { name: "MemoryOrdering", short: "Acquire/Release" },
-  { name: "FuelExhaustion", short: "Cancel termination" },
-  { name: "SupervisorPolicy", short: "Restart bounds" },
-  { name: "EffectAtomicity", short: "Two-phase commit" },
-];
+const ORACLES_INIT: Omit<Oracle, "status">[] = labOracles.map((o) => ({
+  name: o.name,
+  short: o.description,
+  fed: o.fed,
+  example: o.example,
+}));
 
-// Simulate a test run: most oracles pass, some might fail
+const FED_COUNT = ORACLES_INIT.filter((o) => o.fed).length;
+
+// Simulate one lab run with a planted bug: one fed oracle fails, the other fed
+// oracles pass, and the oracles nothing feeds yet report as not fed.
 function simulateRun(): Oracle[] {
-  // Pick 1-2 random indices to fail
-  const failCount = Math.random() > 0.5 ? 2 : 1;
-  const failIndices = new Set<number>();
-  while (failIndices.size < failCount) {
-    failIndices.add(Math.floor(Math.random() * ORACLES_INIT.length));
-  }
+  const fedIndices = ORACLES_INIT.flatMap((o, i) => (o.fed ? [i] : []));
+  const failIndex = fedIndices[Math.floor(Math.random() * fedIndices.length)];
 
   return ORACLES_INIT.map((o, i) => ({
     ...o,
-    status: failIndices.has(i) ? "fail" as const : "pass" as const,
+    status: !o.fed ? ("unfed" as const) : i === failIndex ? ("fail" as const) : ("pass" as const),
   }));
 }
-
-const VIOLATION_MESSAGES: Record<string, string> = {
-  TaskLeak: "task 'worker-3' escaped region 'server' after cancellation",
-  ObligationLeak: "Permit<TcpStream> dropped without consumption at conn_handler:42",
-  CancelProtocol: "task 'processor' skipped Drain phase, jumped directly to Finalize",
-  BudgetOverrun: "task 'db-sync' exceeded 5s drain budget by 1.2s",
-  RegionNesting: "child region 'pool' outlived parent region 'server'",
-  SchedulerFairness: "Cancel Lane starved for 3 consecutive scheduler ticks",
-  QuiescenceCheck: "region 'workers' reported quiescent with 2 tasks still pending",
-  FinalizerOrder: "finalizer at scope:28 ran before finalizer at scope:15 (LIFO violated)",
-  CapabilityEscalation: "task with FiberCap attempted IoCap::tcp_connect",
-  SporkInvariant: "forked region 'child-4' inherited capabilities not in parent set",
-  DeadlockFreedom: "cycle detected: task-A → task-B → task-C → task-A",
-  ProgressGuarantee: "martingale certificate decreased by 0 for 50 consecutive steps",
-  SeedDeterminism: "seed 42 produced different schedule on replay (tick 1847 diverged)",
-  MemoryOrdering: "store at epoch 5 visible before acquire at epoch 4",
-  FuelExhaustion: "cancel fuel underflow: propagation attempted with fuel=0",
-  SupervisorPolicy: "supervisor 'main' exceeded max-restarts (5) within 10s window",
-  EffectAtomicity: "Effect::credit committed without paired Effect::debit commit",
-};
 
 export default function OracleDashboardViz() {
   const prefersReduced = useReducedMotion();
@@ -73,6 +44,7 @@ export default function OracleDashboardViz() {
   const [violation, setViolation] = useState<{ name: string; message: string } | null>(null);
   const [passCount, setPassCount] = useState(0);
   const [failCount, setFailCount] = useState(0);
+  const [unfedCount, setUnfedCount] = useState(0);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   const clearTimers = useCallback(() => {
@@ -87,6 +59,7 @@ export default function OracleDashboardViz() {
     setViolation(null);
     setPassCount(0);
     setFailCount(0);
+    setUnfedCount(0);
   }, [clearTimers]);
 
   const runTest = useCallback(() => {
@@ -98,7 +71,7 @@ export default function OracleDashboardViz() {
 
     // Animate oracles checking one by one
     ORACLES_INIT.forEach((_, i) => {
-      const checkDelay = 80 + i * 100;
+      const checkDelay = 80 + i * 70;
       const resultDelay = checkDelay + 200;
 
       const t1 = setTimeout(() => {
@@ -108,11 +81,12 @@ export default function OracleDashboardViz() {
       const t2 = setTimeout(() => {
         setOracles((prev) => prev.map((o, j) => (j === i ? { ...o, status: finalResults[i].status } : o)));
         if (finalResults[i].status === "pass") setPassCount((c) => c + 1);
+        if (finalResults[i].status === "unfed") setUnfedCount((c) => c + 1);
         if (finalResults[i].status === "fail") {
           setFailCount((c) => c + 1);
           setViolation({
             name: finalResults[i].name,
-            message: VIOLATION_MESSAGES[finalResults[i].name] || "Unknown violation",
+            message: finalResults[i].example ?? "invariant violated",
           });
         }
       }, resultDelay);
@@ -120,7 +94,7 @@ export default function OracleDashboardViz() {
       timersRef.current.push(t1, t2);
     });
 
-    const tDone = setTimeout(() => setIsRunning(false), 80 + ORACLES_INIT.length * 100 + 400);
+    const tDone = setTimeout(() => setIsRunning(false), 80 + ORACLES_INIT.length * 70 + 400);
     timersRef.current.push(tDone);
   }, [isRunning, reset]);
 
@@ -133,12 +107,16 @@ export default function OracleDashboardViz() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h3 className="text-lg font-semibold text-white">Lab Oracle Dashboard</h3>
-          <p className="text-sm text-purple-400">17 built-in correctness monitors</p>
+          <p className="text-sm text-purple-400">
+            {ORACLES_INIT.length} built in · {FED_COUNT} fed by the lab runtime today
+          </p>
         </div>
         <div className="flex items-center gap-3 text-xs font-mono">
           <span className="text-green-400">{passCount} pass</span>
           <span className="text-slate-600">/</span>
           <span className="text-red-400">{failCount} fail</span>
+          <span className="text-slate-600">/</span>
+          <span className="text-slate-500">{unfedCount} not fed</span>
         </div>
       </div>
 
@@ -151,6 +129,7 @@ export default function OracleDashboardViz() {
               case "checking": return "#EAB308";
               case "pass": return "#22C55E";
               case "fail": return "#EF4444";
+              case "unfed": return "#475569";
             }
           })();
 
@@ -164,7 +143,7 @@ export default function OracleDashboardViz() {
               }}
               animate={{ scale: oracle.status === "checking" ? 1.05 : 1 }}
               transition={{ duration: dur }}
-              title={oracle.short}
+              title={oracle.fed ? oracle.short : `${oracle.short} (not fed by the lab runtime yet)`}
             >
               <motion.div
                 className="mx-auto mb-1.5 h-3 w-3 rounded-full"
@@ -178,7 +157,7 @@ export default function OracleDashboardViz() {
                 }}
                 transition={{ duration: dur }}
               />
-              <div className="text-[9px] font-bold text-slate-400 leading-tight truncate">
+              <div className={`text-[9px] font-bold leading-tight truncate ${oracle.fed ? "text-slate-300" : "text-slate-600"}`}>
                 {oracle.name}
               </div>
             </motion.div>
@@ -209,6 +188,12 @@ export default function OracleDashboardViz() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <p className="mb-6 text-xs text-slate-500 leading-relaxed">
+        Brighter names are the oracles every <span className="font-mono">LabRuntime</span> report feeds from runtime
+        state. The dimmer ones exist in the registry but nothing in the runtime feeds them yet, so a
+        report lists them as passed and counts them as not fed. Each run here plants one bug.
+      </p>
 
       {/* Controls */}
       <div className="flex justify-center gap-3">

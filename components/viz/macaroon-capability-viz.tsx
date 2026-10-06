@@ -10,32 +10,33 @@ interface Caveat {
   color: string;
 }
 
+// The five effects in Cx's capability row (CapSet<SPAWN, TIME, RANDOM, IO, REMOTE>).
 const ALL_CAPABILITIES = [
   { id: "spawn", label: "Spawn", desc: "Create child tasks" },
-  { id: "time", label: "Time", desc: "Access clocks and timers" },
-  { id: "trace", label: "Trace", desc: "Emit tracing events" },
-  { id: "region", label: "Region", desc: "Create sub-regions" },
-  { id: "obligation", label: "Obligation", desc: "Create Permits/Leases" },
-  { id: "io", label: "I/O", desc: "Network and filesystem" },
+  { id: "time", label: "Time", desc: "Clocks and timers" },
+  { id: "random", label: "Random", desc: "Deterministic entropy" },
+  { id: "io", label: "I/O", desc: "Network and files" },
+  { id: "remote", label: "Remote", desc: "Other nodes" },
 ];
 
 const AVAILABLE_CAVEATS: Caveat[] = [
   { id: "time-before", label: "TimeBefore(5000ms)", description: "Token expires after 5s of virtual time", color: "#F97316" },
-  { id: "region-scope", label: "RegionScope(worker-3)", description: "Restricted to a single Region", color: "#3B82F6" },
-  { id: "max-uses", label: "MaxUses(10)", description: "Can only be checked 10 times", color: "#8B5CF6" },
+  { id: "region-scope", label: "RegionScope(3)", description: "Valid only inside region 3", color: "#3B82F6" },
+  { id: "max-uses", label: "MaxUses(10)", description: "Verifies at most 10 times", color: "#8B5CF6" },
   { id: "resource-scope", label: "ResourceScope(db/*)", description: "Only database resource paths", color: "#22C55E" },
   { id: "rate-limit", label: "RateLimit(100/60s)", description: "Max 100 uses per 60-second window", color: "#EAB308" },
-  { id: "no-io", label: "ResourceScope(!net/*)", description: "Block all network access", color: "#EF4444" },
+  { id: "task-scope", label: "TaskScope(12)", description: "Valid only when task 12 presents it", color: "#EF4444" },
 ];
 
-// Which capabilities each caveat removes
+// Which effects a scoping caveat visibly narrows. Time, use-count, and rate
+// caveats constrain the whole token, so they only appear in the chain.
 const CAVEAT_RESTRICTIONS: Record<string, string[]> = {
   "time-before": [],
-  "region-scope": ["region"],
+  "region-scope": ["spawn"],
   "max-uses": [],
   "resource-scope": ["io"],
   "rate-limit": [],
-  "no-io": ["io", "trace"],
+  "task-scope": ["remote"],
 };
 
 export default function MacaroonCapabilityViz() {
@@ -74,7 +75,7 @@ export default function MacaroonCapabilityViz() {
         </div>
 
         {/* Capability grid */}
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
           {ALL_CAPABILITIES.map((cap) => {
             const restricted = restrictedCaps.has(cap.id);
             return (
@@ -82,19 +83,19 @@ export default function MacaroonCapabilityViz() {
                 key={cap.id}
                 className="rounded-lg border p-2 text-center"
                 animate={{
-                  borderColor: restricted ? "#EF444440" : "#22C55E40",
-                  backgroundColor: restricted ? "#EF444408" : "#22C55E08",
-                  opacity: restricted ? 0.5 : 1,
+                  borderColor: restricted ? "#F59E0B40" : "#22C55E40",
+                  backgroundColor: restricted ? "#F59E0B08" : "#22C55E08",
+                  opacity: restricted ? 0.75 : 1,
                 }}
                 transition={{ duration: dur }}
               >
                 <div
                   className="text-xs font-bold"
-                  style={{ color: restricted ? "#EF4444" : "#22C55E" }}
+                  style={{ color: restricted ? "#F59E0B" : "#22C55E" }}
                 >
-                  {restricted ? "✗" : "✓"} {cap.label}
+                  {restricted ? "◐" : "✓"} {cap.label}
                 </div>
-                <div className="mt-0.5 text-[9px] text-slate-600">{cap.desc}</div>
+                <div className="mt-0.5 text-[9px] text-slate-600">{restricted ? "narrowed" : cap.desc}</div>
               </motion.div>
             );
           })}
@@ -177,7 +178,8 @@ export default function MacaroonCapabilityViz() {
       </div>
 
       <p className="mt-3 text-center text-[10px] text-slate-600">
-        Caveats can only be added, never removed. Delegation is always safe — the token can only become more restricted.
+        Each caveat re-keys the token&apos;s HMAC-SHA256 chain, so a holder can add one but can&apos;t strip one off.
+        Checking spawns against a token is opt-in (RuntimeBuilder::with_spawn_authorization_key).
       </p>
     </div>
   );

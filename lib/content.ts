@@ -393,6 +393,44 @@ export const tokioMappings: TokioMapping[] = [
   },
 ];
 
+export interface LabOracle {
+  name: string;
+  description: string;
+  /** Fed from runtime state by every LabRuntime report today. */
+  fed: boolean;
+  /** Example violation text, for the fed oracles' demo. */
+  example?: string;
+}
+
+// The 24 reported oracles in src/lab/oracle/registry.rs, with the registry's
+// own descriptions. `fed` mirrors LAB_RUNTIME_FED_ORACLE_NAMES.
+export const labOracles: LabOracle[] = [
+  { name: "task_leak", description: "Detects live tasks left behind when their owning region closes.", fed: true, example: "task 7 is still live after region 2 closed" },
+  { name: "obligation_leak", description: "Detects unresolved obligations at region close.", fed: true, example: "SendPermit held by task 4 was never sent or aborted" },
+  { name: "quiescence", description: "Checks that closed regions have no live children, tasks, finalizers, or obligations.", fed: true, example: "region 3 reported closed with 1 live child task" },
+  { name: "loser_drain", description: "Detects race participants that remain incomplete after a race winner resolves.", fed: true, example: "race loser task 9 still running after the winner resolved" },
+  { name: "finalizer", description: "Checks finalizer registration, execution, and closed-region accounting.", fed: true, example: "region 2 closed with 1 registered finalizer not run" },
+  { name: "region_tree", description: "Checks parent links, roots, and region-tree structure.", fed: true, example: "region 6 names region 4 as parent, but region 4 doesn't list it" },
+  { name: "deadline_monotone", description: "Checks deadline monotonicity across parent and child regions.", fed: true, example: "child region 5 has a later deadline than its parent" },
+  { name: "cancellation_protocol", description: "Checks cancellation requests, acknowledgements, transitions, and final states.", fed: true, example: "task 8 went CancelRequested → Completed without Cancelling" },
+  { name: "down_order", description: "Checks deterministic ordering of process DOWN notifications.", fed: true, example: "DOWN for task 3 delivered before task 2, which completed first" },
+  { name: "region_leak", description: "Detects stuck region creation, close, and task lifecycle leaks.", fed: false },
+  { name: "ambient_authority", description: "Detects effects performed without the corresponding explicit capability.", fed: false },
+  { name: "cancel_correctness", description: "Checks cancel-correct witness validity and observed task lifecycle consistency.", fed: false },
+  { name: "cancel_debt", description: "Tracks cancellation backlog and overdue cleanup work.", fed: false },
+  { name: "cancel_signal_ordering", description: "Checks cancel-signal sequencing and ordering constraints.", fed: false },
+  { name: "runtime_epoch", description: "Checks runtime epoch transitions across tracked modules.", fed: false },
+  { name: "channel_atomicity", description: "Checks reservation commit/abort visibility and waker accounting.", fed: false },
+  { name: "waker_dedup", description: "Detects lost, duplicate, or spurious wakeup state transitions.", fed: false },
+  { name: "actor_leak", description: "Detects actors left running at region close.", fed: false },
+  { name: "supervision", description: "Checks supervisor restart limits, sibling restart policy, and escalation behavior.", fed: false },
+  { name: "mailbox", description: "Checks mailbox capacity, delivery, and backpressure accounting.", fed: false },
+  { name: "rref_access", description: "Detects cross-region, post-close, or witness-mismatch RRef access.", fed: false },
+  { name: "reply_linearity", description: "Checks reply obligations for send-or-abort linearity.", fed: false },
+  { name: "registry_lease", description: "Checks name-registry lease linearity.", fed: false },
+  { name: "supervisor_quiescence", description: "Checks Spork supervisor region quiescence.", fed: false },
+];
+
 // Measured against tokio: p50 per operation, n = 1,000, release build with
 // default features, both runtimes in one process, 2026-10-05, three hosts.
 export const benchMicro: BenchRow[] = [
