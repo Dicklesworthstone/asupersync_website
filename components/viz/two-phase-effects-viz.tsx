@@ -103,8 +103,8 @@ export default function TwoPhaseEffectsViz() {
           {txState === "reserved" && "Checkpoint: Awaiting Commit/Cancel"}
           {txState === "committing" && "Phase 2: Committing..."}
           {txState === "committed" && "Transaction Applied"}
-          {txState === "cancelling" && "Rolling back reservation..."}
-          {txState === "rolled-back" && "Transaction Cancelled Safely"}
+          {txState === "cancelling" && "Releasing the reservation..."}
+          {txState === "rolled-back" && "Cancelled before commit: nothing moved"}
         </div>
 
         {/* Accounts Visualization */}

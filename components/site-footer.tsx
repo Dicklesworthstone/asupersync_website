@@ -44,8 +44,8 @@ export default function SiteFooter() {
                   <span className="text-xl font-black text-white uppercase tracking-tighter group-hover:text-blue-400 transition-colors">{siteConfig.name}</span>
                 </Link>
                 <p className="text-slate-400 font-medium leading-relaxed max-w-xs text-left">
-                  The cancel-correct async runtime for Rust.
-                  Built for structured concurrency and deterministic testing.
+                  A cancel-correct async runtime for Rust: region-owned tasks,
+                  cancellation as a protocol, and a lab runtime that replays schedules.
                 </p>
               </div>
 
@@ -64,11 +64,11 @@ export default function SiteFooter() {
                       }
                       className="h-1.5 w-1.5 rounded-full bg-blue-500 shadow-[0_0_8px_#3B82F6]"
                     />
-                    <span>Runtime Healthy</span>
+                    <span>Pre-1.0 · Experimental</span>
                  </div>
                  <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-[0.3em] text-slate-600">
                     <Activity className="h-3 w-3" />
-                    <span>v0.2.6 Active</span>
+                    <span>v{siteConfig.version} on crates.io · {siteConfig.mainVersion} on main</span>
                  </div>
               </div>
             </div>
@@ -137,7 +137,7 @@ export default function SiteFooter() {
 
           <div className="mt-16 pt-8 border-t border-white/5 flex flex-col md:flex-row items-center justify-between gap-4">
              <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">
-               &copy; <span suppressHydrationWarning>{new Date().getFullYear()}</span> Jeffrey Emanuel. MIT License.
+               &copy; <span suppressHydrationWarning>{new Date().getFullYear()}</span> Jeffrey Emanuel. MIT License with OpenAI/Anthropic rider.
              </p>
              <div className="flex gap-8">
                 <span className="text-[10px] font-black text-white/5 uppercase tracking-[0.5em] select-none">CANCEL-CORRECT BY DESIGN</span>

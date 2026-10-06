@@ -30,19 +30,19 @@ const COLORS = {
 
 const PATHS: Record<PathKind, StepInfo[]> = {
   happy: [
-    { label: "Reserve",  description: "A linear permit is allocated. The type system now tracks it -- it MUST be used exactly once.", nodeIndex: 0, color: COLORS.blue },
-    { label: "Hold",     description: "The permit is actively held while work is performed. Ownership is exclusive and enforced at compile time.", nodeIndex: 1, color: COLORS.green },
-    { label: "Send",     description: "Work is complete. The permit is sent (consumed), fulfilling the linear obligation. All good!", nodeIndex: 2, color: COLORS.blueGlow },
+    { label: "Reserve",  description: "tx.reserve(&cx) returns a permit for one slot. The runtime records it as an obligation that must be resolved exactly once.", nodeIndex: 0, color: COLORS.blue },
+    { label: "Hold",     description: "The task holds the permit while it prepares the message. The slot is reserved, so the later send can't fail for lack of capacity.", nodeIndex: 1, color: COLORS.green },
+    { label: "Send",     description: "permit.send(value) commits the message and resolves the obligation.", nodeIndex: 2, color: COLORS.blueGlow },
   ],
   abort: [
-    { label: "Reserve",  description: "A linear permit is allocated, just like normal.", nodeIndex: 0, color: COLORS.blue },
-    { label: "Hold",     description: "The permit is held, but something goes wrong -- an error or cancellation occurs.", nodeIndex: 1, color: COLORS.green },
-    { label: "Abort",    description: "Even on abort, the linear type forces cleanup. The permit is safely returned. No resource leak!", nodeIndex: 3, color: COLORS.orange },
+    { label: "Reserve",  description: "The task reserves a slot and gets a permit, same as before.", nodeIndex: 0, color: COLORS.blue },
+    { label: "Hold",     description: "While the permit is held, the task hits an error or is cancelled.", nodeIndex: 1, color: COLORS.green },
+    { label: "Abort",    description: "Dropping or aborting the permit releases the slot and resolves the obligation. Nothing was sent, and nothing was lost.", nodeIndex: 3, color: COLORS.orange },
   ],
   leak: [
-    { label: "Reserve",  description: "A linear permit is allocated as usual.", nodeIndex: 0, color: COLORS.blue },
-    { label: "Hold",     description: "The permit is held... but the programmer forgets to send or abort it.", nodeIndex: 1, color: COLORS.green },
-    { label: "LEAKED!",  description: "Without linear types this would be a silent resource leak. Asupersync catches this at COMPILE TIME -- this code will not build.", nodeIndex: 4, color: COLORS.red },
+    { label: "Reserve",  description: "The task reserves a slot and gets a permit.", nodeIndex: 0, color: COLORS.blue },
+    { label: "Hold",     description: "The permit escapes its task without being sent or aborted, for example through mem::forget.", nodeIndex: 1, color: COLORS.green },
+    { label: "LEAKED!",  description: "Rust can't prevent this at compile time; its types are affine, not linear. The runtime can: the region won't close cleanly, and the lab's obligation_leak oracle names the permit kind and its holder.", nodeIndex: 4, color: COLORS.red },
   ],
 };
 
@@ -188,7 +188,7 @@ export default function ObligationFlowViz() {
       <div className="px-5 py-4 border-b border-white/[0.06] flex items-center gap-3">
         <PermitIcon color={COLORS.blue} size={20} />
         <span className="text-sm font-semibold tracking-wide" style={{ color: COLORS.text }}>
-          Permit Lifecycle &mdash; Linear Obligation System
+          Permit Lifecycle &mdash; Runtime-Tracked Obligations
         </span>
       </div>
 
@@ -329,12 +329,12 @@ export default function ObligationFlowViz() {
                 transition={reduced ? { duration: 0 } : { duration: 0.5 }}
               >
                 <div className="text-lg font-bold tracking-widest mb-1" style={{ color: COLORS.red }}>
-                  COMPILE ERROR
+                  OBLIGATION LEAK
                 </div>
                 <div className="text-xs" style={{ color: COLORS.text }}>
-                  Linear permit was never consumed.
+                  SendPermit escaped unresolved.
                   <br />
-                  Asupersync rejects this at compile time.
+                  Reported by the obligation_leak oracle.
                 </div>
               </motion.div>
             </motion.div>

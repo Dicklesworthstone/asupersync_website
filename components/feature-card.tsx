@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useMemo } from "react";
-import { Terminal, Cpu, Lock, Shield, Blocks, Sparkles, Activity, Globe } from "lucide-react";
+import { Terminal, Cpu, Lock, Shield, Blocks, Sparkles, Activity, Globe, Network, Database, Layers, Zap, Eye } from "lucide-react";
 import type { Feature } from "@/lib/content";
 import { SyncNode, SyncContainer } from "./sync-elements";
 import { motion, useMotionValue, useMotionTemplate, AnimatePresence } from "framer-motion";
@@ -11,6 +11,7 @@ import { useSite } from "@/lib/site-state";
 const iconMap: Record<string, React.ElementType> = {
   terminal: Terminal, cpu: Cpu, lock: Lock, shield: Shield,
   blocks: Blocks, sparkles: Sparkles, activity: Activity, globe: Globe,
+  network: Network, database: Database, layers: Layers, zap: Zap, eye: Eye,
 };
 
 const SPECTRUM = ["#3B82F6", "#60A5FA", "#F97316", "#93C5FD", "#2563EB", "#FB923C", "#38bdf8", "#1D4ED8"];
@@ -122,7 +123,7 @@ export default function FeatureCard({ feature }: { feature: Feature }) {
           whileHover={{ color: accentColor }}
         >
           <Activity className="h-3 w-3" />
-          <span>{feature.category ?? "Core Runtime Protocol"}</span>
+          <span>{feature.category ?? "Built in"}</span>
         </motion.div>
       </div>
 

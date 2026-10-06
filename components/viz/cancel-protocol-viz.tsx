@@ -23,18 +23,18 @@ const STATES: { id: Phase; label: string; color: string }[] = [
 const STATUS_TEXT: Record<Phase, string> = {
   Running: "All tasks executing normally.",
   CancelRequested:
-    "Cancel signal received. Notifying running tasks of shutdown budget...",
+    "Cancel requested. It propagates down the region tree; each task will see it at its next checkpoint.",
   Draining:
-    "Tasks winding down gracefully. Flushing buffers, closing connections...",
+    "Tasks acknowledge and drain: flushing buffers, closing connections, still able to await.",
   Finalizing:
-    "Budget nearly exhausted. Forcing remaining stragglers to complete...",
+    "Finalizers run with cancellation masked. The budget is advisory: a straggler isn't killed, it holds up the close.",
   Completed:
-    "All resources released cleanly. Zero leaked state. Zero lost writes.",
+    "Every task has finished and every obligation is resolved. The region reports Completed.",
 };
 
 const TOKIO_TEXT: Record<TokioPhase, string> = {
   Running: "Tasks running...",
-  Dropped: "Runtime dropped. In-flight futures abandoned mid-execution.",
+  Dropped: "Futures dropped at their last await. Whatever they were in the middle of stays half-done.",
 };
 
 const BOX_W = 110;

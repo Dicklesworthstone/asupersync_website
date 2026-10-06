@@ -3,30 +3,28 @@
 import { useMemo } from "react";
 import { ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import { comparisonData } from "@/lib/content";
-import type { ComparisonRow } from "@/lib/content";
+import type { ComparisonCell, ComparisonRow } from "@/lib/content";
 import { cn } from "@/lib/utils";
 import { SyncContainer } from "./sync-elements";
 import GlitchText from "./glitch-text";
 import { motion } from "framer-motion";
 
-function StatusCell({ value }: { value: string }) {
-  const isPositive = ["First-class", "3-phase", "Enforced", "Built-in", "Lab Runtime", "Compile-time", "3-lane", "Guaranteed", "8+", "12 proofs", "Reserve/Commit", "35 rules (Lean)", "Spectral (real-time)", "17 built-in", "Macaroon (8 caveats)", "E-process (anytime)", "16 op kinds (CALM)", "Lyapunov + martingale"].includes(value);
-  const isPartial = ["Work-stealing", "Separate crates", "Partial", "Loom tests", "Best-effort"].includes(value);
-  const isNegative = ["Manual", "No", "Silent drop", "Minimal"].includes(value);
-
+function StatusCell({ cell }: { cell: ComparisonCell }) {
+  const { text, tone } = cell;
   return (
     <td
       className={cn(
-        "whitespace-nowrap px-4 py-3 text-sm font-medium",
-        isPositive && "text-blue-400",
-        isPartial && "text-yellow-400/80",
-        isNegative && "text-slate-500"
+        "px-4 py-3 text-sm font-medium min-w-[10rem]",
+        tone === "yes" && "text-blue-400",
+        tone === "partial" && "text-yellow-400/80",
+        tone === "no" && "text-slate-500",
+        tone === "neutral" && "text-slate-500"
       )}
     >
-      {isPositive && <span className="mr-1.5 shadow-[0_0_8px_#3B82F6]">&#10003;</span>}
-      {isNegative && <span className="mr-1.5">&#10005;</span>}
-      {isPartial && <span className="mr-1.5">&#9888;</span>}
-      {value}
+      {tone === "yes" && <span className="mr-1.5 shadow-[0_0_8px_#3B82F6]" aria-hidden="true">&#10003;</span>}
+      {tone === "no" && <span className="mr-1.5" aria-hidden="true">&#10005;</span>}
+      {tone === "partial" && <span className="mr-1.5" aria-hidden="true">&#9888;</span>}
+      {text}
     </td>
   );
 }
@@ -99,7 +97,7 @@ export default function ComparisonTable() {
                     );
                   }
 
-                  return <StatusCell key={cell.id} value={String(cell.getValue())} />;
+                  return <StatusCell key={cell.id} cell={cell.getValue() as ComparisonCell} />;
                 })}
               </motion.tr>
             ))}

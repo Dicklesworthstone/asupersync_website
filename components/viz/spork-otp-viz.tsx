@@ -34,8 +34,9 @@ export default function SporkOtpViz() {
       const t2 = setTimeout(() => {
         setMsgState("processing");
         const t3 = setTimeout(() => {
-          // In traditional OTP/Erlang, if the developer forgets to reply, it's a silent leak.
-          // In Asupersync (Rust mode), the compiler enforces the reply obligation.
+          // In plain OTP, a forgotten reply leaves the caller waiting. In
+          // Asupersync the Reply is a tracked obligation, so the server path
+          // either replies or fails loudly.
           if (isRustMode) {
              setMsgState("replied");
           } else {
@@ -188,9 +189,9 @@ export default function SporkOtpViz() {
       {/* Description Panel */}
       <div className="mt-6 p-4 rounded-xl border border-white/5 bg-slate-800/30 text-sm text-slate-400 leading-relaxed">
          {isRustMode ? (
-            <p><strong className="text-white">Asupersync Guarantee:</strong> GenServer requests are bundled with a linear <span className="text-blue-400 font-mono">ReplyObligation</span> token. The Rust compiler ensures the server developer <em className="text-slate-300">cannot</em> forget to reply. If the token is dropped unhandled, the code will not compile.</p>
+            <p><strong className="text-white">In Asupersync:</strong> each call hands the server a <span className="text-blue-400 font-mono">Reply</span> that wraps a tracked obligation. The server must <span className="font-mono">send</span> or <span className="font-mono">abort</span> it. Dropping it unanswered panics (outside cancellation and unwinding), the supervisor sees the failure, and the lab&apos;s <span className="font-mono">reply_linearity</span> oracle checks the same rule. The caller gets an answer or an error, never silence. This is enforced at runtime, not by the compiler.</p>
          ) : (
-            <p><strong className="text-white">Traditional Vulnerability:</strong> In standard Erlang/OTP or basic Rust channels, a server might hit an error path and return early without sending a reply. The client task will asynchronously hang forever waiting for a response that will never arrive.</p>
+            <p><strong className="text-white">Without a reply obligation:</strong> with plain channels, or in OTP without a call timeout, a server can take an early-return error path and never reply. The caller waits for an answer that isn&apos;t coming.</p>
          )}
       </div>
     </div>

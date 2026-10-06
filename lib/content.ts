@@ -1,10 +1,16 @@
 // Site configuration
 export const siteConfig = {
   name: "Asupersync",
-  title: "Asupersync — The Cancel-Correct Async Runtime for Rust",
-  description: "A structured concurrency runtime for Rust with first-class cancellation, linear obligations, capability security, and deterministic testing.",
+  title: "Asupersync — Cancel-Correct Async for Rust",
+  description:
+    "An async runtime for Rust where every task belongs to a region, cancellation is a protocol instead of a silent drop, effects go through an explicit capability context, and a lab runtime replays any schedule from its seed.",
   url: "https://asupersync.com",
   github: "https://github.com/Dicklesworthstone/asupersync",
+  demoUrl: "https://dicklesworthstone.github.io/asupersync/asupersync_web_demo.html",
+  cratesUrl: "https://crates.io/crates/asupersync",
+  // Latest version published to crates.io, and the unreleased line on main.
+  version: "0.5.0",
+  mainVersion: "0.6.0",
   social: {
     github: "https://github.com/Dicklesworthstone/asupersync",
     x: "https://x.com/doodlestein",
@@ -36,12 +42,19 @@ export interface Feature {
   category?: string;
 }
 
+export type ComparisonTone = "yes" | "partial" | "no" | "neutral";
+
+export interface ComparisonCell {
+  text: string;
+  tone: ComparisonTone;
+}
+
 export interface ComparisonRow {
   feature: string;
-  asupersync: string;
-  tokio: string;
-  asyncStd: string;
-  smol: string;
+  asupersync: ComparisonCell;
+  tokio: ComparisonCell;
+  asyncStd: ComparisonCell;
+  smol: ComparisonCell;
 }
 
 export interface ChangelogEntry {
@@ -61,327 +74,641 @@ export interface FaqItem {
   answer: string;
 }
 
+export interface TokioMapping {
+  tokio: string;
+  asupersync: string;
+  note: string;
+}
+
+export interface BenchRow {
+  workload: string;
+  asupersync: string;
+  tokio: string;
+  ratio: string;
+}
+
+export interface OnrampLevel {
+  level: number;
+  title: string;
+  adds: string;
+  file: string;
+  code: string;
+}
+
 // Hero stats
 export const heroStats: Stat[] = [
-  { label: "Cancel Phases", value: "3", helper: "Request → Drain → Finalize" },
-  { label: "Built-in Protocols", value: "8+", helper: "Cancel-correct by design" },
-  { label: "Formal Proofs", value: "12", helper: "Verified safety guarantees" },
-  { label: "Test Seeds", value: "∞", helper: "Deterministic Lab runtime" },
+  { label: "Outcome variants", value: "4", helper: "Ok, Err, Cancelled, Panicked" },
+  { label: "Built-in lab oracles", value: "24", helper: "9 are fed from runtime state today" },
+  { label: "Lean-checked invariants", value: "6", helper: "Of the abstract model, not the Rust code" },
+  { label: "tokio in the default build", value: "0", helper: "No normal-edge dependency" },
 ];
 
-// Features
+// What ships in the box. `category` is the support status shown on each card.
 export const features: Feature[] = [
   {
-    title: "Structured Concurrency",
-    description: "Every task lives inside a Region. When a Region closes, all tasks within it are cancelled, awaited, and cleaned up — automatically. No orphaned futures, no leaked goroutines.",
+    title: "Runtime and scheduler",
+    description:
+      "A multi-thread work-stealing scheduler with three lanes (cancel, timed, ready), a current-thread flavor, and an on-demand blocking pool. Linux epoll is the main reactor, with optional io_uring; the BSD and Windows reactors accept fewer interest flags.",
+    icon: "cpu",
+    category: "Built in",
+  },
+  {
+    title: "Channels and sync",
+    description:
+      "mpsc, oneshot, broadcast, watch, and session channels with reserve-then-send. Mutex, RwLock, Semaphore, Barrier, Notify, OnceCell, and an object pool. Every wait takes &Cx and can be cancelled.",
     icon: "blocks",
-    category: "Concurrency Model",
+    category: "Built in",
   },
   {
-    title: "Cancel-Correct Protocol",
-    description: "Three-phase cancellation: Request → Drain → Finalize. Tasks get budgeted time to clean up connections, flush buffers, and release resources. Never a silent drop again.",
-    icon: "shield",
-    category: "Core Runtime Protocol",
+    title: "Combinators",
+    description:
+      "join, race, and timeout drain their losers instead of dropping them. Beyond those: quorum, hedge, first_ok, pipeline, map_reduce, circuit_breaker, bulkhead, rate_limit, bracket, and retry.",
+    icon: "layers",
+    category: "Built in",
   },
   {
-    title: "Linear Obligations",
-    description: "Permits must be explicitly consumed — sent, completed, or aborted. The type system prevents you from forgetting to handle them. Compile-time resource leak prevention.",
-    icon: "lock",
-    category: "Type System Guarantee",
-  },
-  {
-    title: "Capability Security",
-    description: "Tasks receive a Cx (capability context) that controls what they can do. Spawn, I/O, timers — all gated by capabilities. Principle of least authority, enforced by the runtime.",
-    icon: "cpu",
-    category: "Security Model",
-  },
-  {
-    title: "Lab Runtime",
-    description: "Deterministic testing with seed-controlled execution order. Replay any interleaving. Integrated DPOR (Dynamic Partial Order Reduction) finds concurrency bugs systematically.",
+    title: "Fibers",
+    description:
+      "cx::fiber::scope runs futures that borrow from the task's stack concurrently, each with its own cancellation. A fiber costs about what a tokio task does. Fibers share one thread, so reach for tasks when you want parallelism.",
     icon: "sparkles",
-    category: "Testing Infrastructure",
+    category: "Built in",
   },
   {
-    title: "Three-Lane Scheduler",
-    description: "Cancel lane (highest priority), Timed lane (deadlines), Ready lane (normal work). Cancellation always wins the race, ensuring prompt cleanup even under load.",
-    icon: "activity",
-    category: "Scheduler Design",
-  },
-  {
-    title: "Built-in Ecosystem",
-    description: "Cancel-correct TCP, HTTP, channels, mutexes, and supervisors out of the box. Every protocol respects the cancel contract. No need to wrap Tokio primitives.",
+    title: "Networking",
+    description:
+      "TCP, UDP, and Unix sockets, DNS, TLS 1.2/1.3 through rustls, and WebSocket with an RFC 6455 conformance suite. Under the lab runtime, a virtual TCP stack replaces kernel sockets.",
     icon: "globe",
-    category: "Protocol Ecosystem",
+    category: "Built in · TLS behind a feature",
   },
   {
-    title: "Two-Phase Effects",
-    description: "Reserve/commit pattern: side effects are staged before cancellation checkpoints, then committed atomically. If cancellation arrives mid-operation, only reserved (uncommitted) work is rolled back.",
+    title: "HTTP and gRPC",
+    description:
+      "HTTP/1.1 and HTTP/2 servers, a pooled HTTP/1.1 client, gRPC, and a small router with extractors, middleware, and SSE. It isn't axum: handlers use Asupersync's own Request and Response types.",
+    icon: "network",
+    category: "Built in",
+  },
+  {
+    title: "QUIC and HTTP/3",
+    description:
+      "Native QUIC and HTTP/3 with no tokio underneath, including a multi-peer listener over real UDP with streaming request bodies. Multi-connection deployment, 0-RTT, migration, and interop with other stacks are still unproven.",
+    icon: "zap",
+    category: "Feature-gated · partial",
+  },
+  {
+    title: "Databases",
+    description:
+      "PostgreSQL (binary protocol, SCRAM-SHA-256) and MySQL clients that speak the wire protocol directly over TcpStream, plus SQLite on the blocking pool. Prepared statements, transactions, and connection reuse.",
+    icon: "database",
+    category: "Feature-gated",
+  },
+  {
+    title: "Actors and supervision",
+    description:
+      "Spork, the OTP-style layer: GenServers, actors, monitors, and links that run as tasks in the caller's region. Supervision trees restart failed children one-for-one, one-for-all, or rest-for-one with intensity and backoff limits.",
     icon: "shield",
-    category: "Effect Safety",
+    category: "Built in",
   },
   {
-    title: "Budget Algebra",
-    description: "Cancel budgets compose algebraically as a product semiring. When regions nest, their budgets merge via min(deadlines) \u00D7 min(quotas) \u00D7 max(priority). Consistent cancel timing across arbitrarily deep hierarchies.",
-    icon: "cpu",
-    category: "Formal Foundations",
-  },
-  {
-    title: "17 Test Oracles",
-    description: "The Lab runtime ships with 17 built-in correctness monitors — from TaskLeak and ObligationLeak to CancelProtocol and DeadlineMonotone. Each oracle independently watches for a specific class of concurrency bug during deterministic testing.",
-    icon: "sparkles",
-    category: "Testing Infrastructure",
-  },
-  {
-    title: "Spectral Deadlock Detection",
-    description: "Analyzes the wait-graph\u2019s Laplacian eigenvalues in real time. When the Fiedler value drops near zero, the scheduler detects incipient deadlocks before they fully form.",
-    icon: "activity",
-    category: "Scheduler Design",
-  },
-  {
-    title: "Formal Small-Step Semantics",
-    description: "35 transition rules define every possible async state change — from SPAWN and CANCEL-PROPAGATE to CHECKPOINT-MASKED and CLOSE-RUN-FINALIZER. These rules are mechanized in Lean 4, bridging the gap between spec-doc prose and machine-checked proofs.",
-    icon: "lock",
-    category: "Formal Foundations",
-  },
-  {
-    title: "Macaroon Capability Attenuation",
-    description: "Capabilities use a decentralized Macaroon model with 8 caveat predicates: time bounds, region scope, task scope, max uses, resource glob patterns, rate limits, and custom key-value constraints. Caveats can only restrict — never widen — making delegation safe without a central authority.",
-    icon: "lock",
-    category: "Security Model",
-  },
-  {
-    title: "E-Process Invariant Monitoring",
-    description: "The Lab runtime uses E-processes (betting martingales via Ville's inequality) for anytime-valid statistical monitoring. Unlike fixed-sample tests, you can peek at any time and reject if the E-value exceeds 1/α — no p-hacking, no multiple-testing correction needed.",
-    icon: "activity",
-    category: "Testing Infrastructure",
-  },
-  {
-    title: "Saga Compensation",
-    description: "Distributed operations use a Saga pattern with 16 operation kinds split into monotone (coordination-free) and non-monotone (barrier-required) classes. CALM analysis batches consecutive monotone steps, inserting coordination barriers only before non-monotone operations like Commit or Release.",
+    title: "Remote tasks",
+    description:
+      "Region-owned remote spawn over a native TCP + mutual-TLS protocol, with leases that count as obligations, an idempotency store for retries, and saga compensation. Route persistence and WAN reliability are open work.",
     icon: "globe",
-    category: "Effect Safety",
+    category: "Built in · scoped",
   },
   {
-    title: "Lyapunov Potential Scheduling",
-    description: "A 4-component Lyapunov function — live tasks, obligation age, draining regions, and deadline pressure — provides a formal energy measure that strictly decreases over time. The scheduler uses this potential to prove that the system always makes progress toward quiescence.",
+    title: "RaptorQ and ATP",
+    description:
+      "An RFC 6330 fountain codec with a deterministic decode planner. Its main consumer is ATP, the file-transfer protocol: QUIC or TCP, Merkle-verified commits, resumable journals, and multi-donor bonded pulls.",
     icon: "activity",
-    category: "Scheduler Design",
+    category: "Built in",
+  },
+  {
+    title: "Browser Edition",
+    description:
+      "A wasm32 build with JS/TS packages for the main thread and dedicated workers. In the browser it's a ledger of regions, scopes, and task handles over the host's promises, with fetch, WebSocket, and WebTransport behind capabilities.",
+    icon: "terminal",
+    category: "Release candidate",
+  },
+  {
+    title: "Observability",
+    description:
+      "Structured logs carrying task and region IDs, counters, gauges, and histograms with an optional OpenTelemetry exporter, a live task inspector, and diagnostics that explain why a task is blocked or why it was cancelled.",
+    icon: "eye",
+    category: "Built in",
+  },
+  {
+    title: "Lab runtime",
+    description:
+      "Virtual time, seeded scheduling, trace capture and replay, deterministic chaos injection, futurelock detection, crashpacks, and race-guided schedule exploration that skips runs equivalent to ones it has already seen.",
+    icon: "lock",
+    category: "Built in",
   },
 ];
 
-// Comparison data
+// Comparison data, following the upstream README's own table.
 export const comparisonData: ComparisonRow[] = [
-  { feature: "Structured Concurrency", asupersync: "First-class", tokio: "Manual", asyncStd: "Manual", smol: "Manual" },
-  { feature: "Cancel Protocol", asupersync: "3-phase", tokio: "Silent drop", asyncStd: "Silent drop", smol: "Silent drop" },
-  { feature: "Linear Obligations", asupersync: "Enforced", tokio: "No", asyncStd: "No", smol: "No" },
-  { feature: "Capability Security", asupersync: "Built-in", tokio: "No", asyncStd: "No", smol: "No" },
-  { feature: "Deterministic Testing", asupersync: "Lab Runtime", tokio: "No", asyncStd: "No", smol: "No" },
-  { feature: "Resource Leak Prevention", asupersync: "Compile-time", tokio: "Manual", asyncStd: "Manual", smol: "Manual" },
-  { feature: "Scheduler Priority", asupersync: "3-lane", tokio: "Work-stealing", asyncStd: "Work-stealing", smol: "Work-stealing" },
-  { feature: "Cancellation Priority", asupersync: "Guaranteed", tokio: "Best-effort", asyncStd: "Best-effort", smol: "Best-effort" },
-  { feature: "Built-in Protocols", asupersync: "8+", tokio: "Separate crates", asyncStd: "Partial", smol: "Minimal" },
-  { feature: "Formal Verification", asupersync: "12 proofs", tokio: "Loom tests", asyncStd: "No", smol: "No" },
-  { feature: "Two-Phase Effects", asupersync: "Reserve/Commit", tokio: "No", asyncStd: "No", smol: "No" },
-  { feature: "Formal Semantics", asupersync: "35 rules (Lean)", tokio: "No", asyncStd: "No", smol: "No" },
-  { feature: "Deadlock Detection", asupersync: "Spectral (real-time)", tokio: "No", asyncStd: "No", smol: "No" },
-  { feature: "Test Oracles", asupersync: "17 built-in", tokio: "No", asyncStd: "No", smol: "No" },
-  { feature: "Capability Attenuation", asupersync: "Macaroon (8 caveats)", tokio: "No", asyncStd: "No", smol: "No" },
-  { feature: "Statistical Monitoring", asupersync: "E-process (anytime)", tokio: "No", asyncStd: "No", smol: "No" },
-  { feature: "Saga Compensation", asupersync: "16 op kinds (CALM)", tokio: "No", asyncStd: "No", smol: "No" },
-  { feature: "Progress Proofs", asupersync: "Lyapunov + martingale", tokio: "No", asyncStd: "No", smol: "No" },
+  {
+    feature: "Structured concurrency",
+    asupersync: { text: "Every task belongs to a region", tone: "yes" },
+    tokio: { text: "Opt-in (JoinSet, TaskTracker)", tone: "partial" },
+    asyncStd: { text: "Manual", tone: "no" },
+    smol: { text: "Manual", tone: "no" },
+  },
+  {
+    feature: "Cancellation",
+    asupersync: { text: "Request → drain → finalize, cooperative", tone: "partial" },
+    tokio: { text: "Drop, or CancellationToken", tone: "partial" },
+    asyncStd: { text: "Drop", tone: "partial" },
+    smol: { text: "Drop", tone: "partial" },
+  },
+  {
+    feature: "Orphan tasks",
+    asupersync: { text: "None from Cx spawns", tone: "yes" },
+    tokio: { text: "spawn detaches", tone: "no" },
+    asyncStd: { text: "spawn detaches", tone: "no" },
+    smol: { text: "spawn detaches", tone: "no" },
+  },
+  {
+    feature: "Bounded cleanup",
+    asupersync: { text: "Advisory budgets", tone: "partial" },
+    tokio: { text: "Best-effort", tone: "no" },
+    asyncStd: { text: "Best-effort", tone: "no" },
+    smol: { text: "Best-effort", tone: "no" },
+  },
+  {
+    feature: "Deterministic testing",
+    asupersync: { text: "Built-in lab runtime", tone: "yes" },
+    tokio: { text: "Paused time; loom, turmoil", tone: "partial" },
+    asyncStd: { text: "External tools", tone: "no" },
+    smol: { text: "External tools", tone: "no" },
+  },
+  {
+    feature: "Obligation tracking",
+    asupersync: { text: "Permits tracked, leaks reported", tone: "yes" },
+    tokio: { text: "None", tone: "no" },
+    asyncStd: { text: "None", tone: "no" },
+    smol: { text: "None", tone: "no" },
+  },
+  {
+    feature: "Per-task cost",
+    asupersync: { text: "Several times tokio's", tone: "partial" },
+    tokio: { text: "The reference point", tone: "yes" },
+    asyncStd: { text: "—", tone: "neutral" },
+    smol: { text: "—", tone: "neutral" },
+  },
+  {
+    feature: "Ecosystem",
+    asupersync: { text: "Broad built-in stack; tokio crates need adapters", tone: "partial" },
+    tokio: { text: "Largest; most crates assume it", tone: "yes" },
+    asyncStd: { text: "Medium", tone: "partial" },
+    smol: { text: "Small", tone: "partial" },
+  },
+  {
+    feature: "Maturity",
+    asupersync: { text: "Pre-1.0, experimental", tone: "partial" },
+    tokio: { text: "Production", tone: "yes" },
+    asyncStd: { text: "Discontinued in 2025", tone: "neutral" },
+    smol: { text: "Production", tone: "yes" },
+  },
 ];
 
-// Code example
-export const codeExample = `use asupersync::{Region, Cx, Outcome, Budget};
+// Structured concurrency in its smallest real form (from the upstream README).
+export const codeExample = `use asupersync::{main, prelude::*};
+
+#[main]
+async fn main(cx: &Cx) {
+    // A scope whose tasks get at most 64 polls each.
+    let scope = cx.scope_with_budget(Budget::new().with_poll_quota(64));
+    let mut tasks = JoinSet::new(&scope);
+
+    for value in 1..=2_u32 {
+        tasks
+            .spawn(cx, move |_| async move { Ok::<_, Error>(value) })
+            .expect("spawn region-owned task");
+    }
+
+    let results = tasks.join_all(cx).await;
+    // Nothing spawned into the set is still running here.
+    assert_eq!(results.len(), 2);
+}`;
+
+// The same producer/consumer program in both runtimes (from the upstream README).
+export const codeExampleTokio = `use tokio::sync::mpsc;
+use tokio::time::{sleep, Duration};
+
+#[tokio::main]
+async fn main() {
+    let (tx, mut rx) = mpsc::channel(10);
+
+    tokio::spawn(async move {
+        for i in 0..5 {
+            tx.send(i).await.unwrap();
+            sleep(Duration::from_millis(100)).await;
+        }
+    });
+
+    while let Some(val) = rx.recv().await {
+        println!("got: {val}");
+    }
+}`;
+
+export const codeExampleAsupersync = `use asupersync::channel::mpsc;
+use asupersync::{Cx, Outcome};
+use asupersync::time::sleep;
 use std::time::Duration;
 
-#[asupersync::main]
-async fn main(cx: &Cx) -> Outcome<()> {
-    // Open a region — all tasks scoped here
-    Region::open(cx, "server", async |cx| {
-        // Spawn a listener with cancel capability
-        let permit = cx.spawn("listener", async |cx| {
-            let listener = cx.tcp_bind("0.0.0.0:8080").await?;
-            loop {
-                let (stream, _) = listener.accept(cx).await?;
-                cx.spawn("conn", handle_connection(stream));
-            }
-        });
+async fn run(cx: &Cx) {
+    let (tx, mut rx) = mpsc::channel::<i32>(10);
 
-        // Wait for shutdown signal
-        cx.shutdown_signal().await;
+    let mut producer = cx.spawn(move |cx| async move {
+        for i in 0..5 {
+            let Ok(permit) = tx.reserve(&cx).await else {
+                break; // cancelled, or the receiver closed
+            };
+            let Outcome::Ok(()) = permit.send(i) else {
+                break; // the receiver left after we reserved
+            };
+            sleep(cx.now(), Duration::from_millis(100)).await;
+        }
+    }).expect("spawn producer");
 
-        // Cancel with budget — tasks get 5s to drain
-        permit.cancel(Budget::timeout(Duration::from_secs(5)));
-    }).await
+    while let Ok(val) = rx.recv(&cx).await {
+        println!("got: {val}");
+    }
+
+    let _ = producer.join(cx).await;
 }`;
 
-// Second code example: Two-Phase Effects
-export const codeExampleTwoPhase = `use asupersync::{Region, Cx, Outcome, Effect};
+// Coming from tokio: the primitives people use daily.
+export const tokioMappings: TokioMapping[] = [
+  {
+    tokio: "tokio::spawn(fut)",
+    asupersync: "cx.spawn(|cx| async move { … })",
+    note: "The task belongs to the caller's region, and the closure gets its own Cx.",
+  },
+  {
+    tokio: "JoinHandle<T>",
+    asupersync: "TaskHandle<T>",
+    note: ".join(cx).await keeps cancellation and panic as separate outcomes.",
+  },
+  {
+    tokio: "JoinSet<T>",
+    asupersync: "JoinSet::in_cx(cx)",
+    note: "join_next, join_all, and cancel_all all keep ownership of the drain.",
+  },
+  {
+    tokio: "tokio::select!",
+    asupersync: "race!(cx, { … })",
+    note: "Returns only after the losers have been cancelled and drained.",
+  },
+  {
+    tokio: "FuturesUnordered",
+    asupersync: "cx::fiber::scope(|s| …)",
+    note: "Borrowing futures, no 'static bound, all on the calling task's thread.",
+  },
+  {
+    tokio: "time::sleep(dur)",
+    asupersync: "sleep(cx.now(), dur)",
+    note: "Takes the current time explicitly, so the lab can run it on virtual time.",
+  },
+  {
+    tokio: "time::timeout(dur, fut)",
+    asupersync: "scope.timeout(&cx, dur, |cx| op)",
+    note: "On expiry the operation is cancelled and drained, and a late result is reported.",
+  },
+  {
+    tokio: "mpsc::channel(n)",
+    asupersync: "channel::mpsc::channel(n)",
+    note: "tx.reserve(&cx).await?.send(v). A one-call send() exists for the common case.",
+  },
+  {
+    tokio: "sync::Mutex",
+    asupersync: "sync::Mutex",
+    note: "lock(&cx).await? can be cancelled while waiting, so it returns a Result.",
+  },
+  {
+    tokio: "sync::Semaphore",
+    asupersync: "sync::Semaphore",
+    note: "acquire(&cx, n).await?. Each permit is an obligation the runtime tracks.",
+  },
+];
 
-async fn transfer_funds(cx: &Cx, from: Account, to: Account, amount: u64) -> Outcome<()> {
-    // Phase 1: Reserve — stage the side effects
-    let debit = cx.reserve(Effect::debit(&from, amount)).await?;
-    let credit = cx.reserve(Effect::credit(&to, amount)).await?;
+// Measured against tokio: p50 per operation, n = 1,000, release build with
+// default features, both runtimes in one process, 2026-10-05, three hosts.
+export const benchMicro: BenchRow[] = [
+  { workload: "spawn + join from a task, 4 workers", asupersync: "4.2–12.4 µs", tokio: "0.31–0.68 µs", ratio: "9–27×" },
+  { workload: "spawn + join from block_on, current-thread", asupersync: "3.0–7.1 µs", tokio: "0.21–0.51 µs", ratio: "10–14×" },
+  { workload: "yield_now, 4 workers", asupersync: "0.35–0.58 µs", tokio: "0.23–0.56 µs", ratio: "1.0–2.0×" },
+  { workload: "yield_now, current-thread", asupersync: "0.30–0.57 µs", tokio: "0.09–0.15 µs", ratio: "3.2–3.9×" },
+  { workload: "mpsc ping-pong round trip, 4 workers", asupersync: "1.26–1.77 µs", tokio: "0.20–0.57 µs", ratio: "3.1–6.3×" },
+  { workload: "mpsc ping-pong round trip, current-thread", asupersync: "1.26–1.76 µs", tokio: "0.17–0.30 µs", ratio: "5.8–7.5×" },
+  { workload: "fan-out child: fiber::scope vs spawn + join, current-thread", asupersync: "0.21–0.56 µs", tokio: "0.21–0.51 µs", ratio: "0.9–1.1×" },
+  { workload: "fan-out child: fiber::scope vs spawn + join, 4 workers", asupersync: "0.20–0.39 µs", tokio: "0.31–0.68 µs", ratio: "0.55–0.85×" },
+];
 
-    // Cancellation checkpoint — if cancelled here,
-    // reservations are automatically rolled back. No money lost.
-    cx.cancel_checkpoint().await?;
+// Server-shaped workloads. `ratio` is how much faster tokio is.
+export const benchServer: BenchRow[] = [
+  { workload: "TCP request/response, 1 connection", asupersync: "30–44K round trips/s", tokio: "46–76K", ratio: "1.55–1.7×" },
+  { workload: "TCP request/response, 64 connections", asupersync: "93–129K round trips/s", tokio: "123–144K", ratio: "1.1–1.3×" },
+  { workload: "HTTP/1.1 keep-alive GET, 1 connection (vs hyper)", asupersync: "22K requests/s", tokio: "44K", ratio: "2.0×" },
+  { workload: "HTTP/1.1 keep-alive GET, 64 connections (vs hyper)", asupersync: "64K requests/s", tokio: "134K", ratio: "2.1×" },
+];
 
-    // Phase 2: Commit — atomically apply both effects
-    debit.commit().await?;
-    credit.commit().await?;
-    Outcome::ok(())
+// The graduated on-ramp. Each level is a complete program in the upstream
+// examples/ directory, copied verbatim (minus the leading doc comment).
+export const onrampLevels: OnrampLevel[] = [
+  {
+    level: 0,
+    title: "Enter the runtime",
+    adds: "The attribute entry point. No builder, executor handle, or capability to learn yet.",
+    file: "examples/onramp_level0.rs",
+    code: `use asupersync::main;
+
+#[main]
+async fn main() {
+    println!("hello from asupersync");
+}`,
+  },
+  {
+    level: 1,
+    title: "Cx, Outcome, and Budget",
+    adds: "main receives the capability context. Budgets combine with meet, and the tighter one wins.",
+    file: "examples/onramp_level1.rs",
+    code: `use asupersync::{main, prelude::*};
+
+#[main]
+async fn main(cx: &Cx) {
+    let service = Budget::new().with_poll_quota(64);
+    let request = Budget::new().with_poll_quota(16);
+    let effective = service.meet(request);
+    assert_eq!(effective.remaining_polls(), 16);
+
+    cx.checkpoint()
+        .expect("budget and cancellation permit work");
+    let outcome: Outcome<u32, Error> = Outcome::ok(42);
+    assert_eq!(outcome.expect("work succeeds"), 42);
+}`,
+  },
+  {
+    level: 2,
+    title: "Scopes and region-owned fan-out",
+    adds: "A JoinSet owns dynamic fan-out inside one region; nothing outlives the join.",
+    file: "examples/onramp_level2.rs",
+    code: `use asupersync::{main, prelude::*};
+
+#[main]
+async fn main(cx: &Cx) {
+    let scope = cx.scope_with_budget(Budget::new().with_poll_quota(64));
+    let mut tasks = JoinSet::new(&scope);
+
+    for value in 1..=3_u32 {
+        tasks
+            .spawn(cx, move |_| async move { Ok::<_, Error>(value) })
+            .expect("spawn region-owned task");
+    }
+
+    let sum = tasks
+        .join_all(cx)
+        .await
+        .into_iter()
+        .map(|outcome| outcome.expect("child succeeds"))
+        .sum::<u32>();
+    assert_eq!(sum, 6);
+}`,
+  },
+  {
+    level: 3,
+    title: "Two-phase sends and a lab oracle",
+    adds: "Reserve, then send. Then leak a permit on purpose inside the lab and watch the obligation-leak oracle name it.",
+    file: "examples/onramp_level3.rs",
+    code: `use asupersync::{LabConfig, LabRuntime, main, prelude::*};
+
+#[main]
+async fn main(cx: &Cx) {
+    let (tx, mut rx) = mpsc::channel::<u8>(1);
+    let permit = tx.reserve(cx).await.expect("reserve channel capacity");
+    permit.send(7);
+    assert_eq!(rx.recv(cx).await.expect("receive committed value"), 7);
+
+    // The same reservation inside a deterministic lab task, except that this
+    // permit escapes without \`send\` or \`abort\`. Stock permits are runtime
+    // obligations, so the lab's obligation-leak oracle catches it by kind
+    // without any hand-built obligation record.
+    let mut lab = LabRuntime::new(LabConfig::new(7).panic_on_leak(false));
+    let region = lab.state.create_root_region(Budget::INFINITE);
+    let (task, _handle) = lab
+        .state
+        .create_task(region, Budget::INFINITE, async {
+            let cx = Cx::current().expect("lab task installs a current Cx");
+            let (tx, _rx) = mpsc::channel::<u8>(1);
+            let permit = tx.reserve(&cx).await.expect("reserve channel capacity");
+            std::mem::forget(permit); // deliberate on-ramp leak
+        })
+        .expect("create lab task");
+    lab.scheduler.lock().schedule(task, 0);
+    lab.run_until_quiescent();
+
+    let report = lab.report();
+    let leak = report
+        .oracle_report
+        .entry("obligation_leak")
+        .expect("obligation leak oracle is registered");
+    assert!(!leak.passed, "the lab must catch the deliberate leak");
+    let violation = leak.violation.as_deref().unwrap_or_default();
+    assert!(
+        violation.contains("SendPermit"),
+        "the oracle names the leaked permit kind: {violation}"
+    );
+}`,
+  },
+];
+
+// Fibers: concurrent child futures that borrow the caller's data.
+export const codeExampleFibers = `use asupersync::cx::fiber;
+use asupersync::main;
+
+#[main]
+async fn main() {
+    let words = vec!["structured", "concurrency", "over", "borrowed", "data"];
+    let words = &words;
+    let letters = fiber::scope(|scope| async move {
+        let handles: Vec<_> = words
+            .iter()
+            .map(|word| scope.spawn(async move { word.len() }))
+            .collect();
+        let mut letters = 0;
+        for handle in handles {
+            letters += handle.await.expect("fiber finished");
+        }
+        letters
+    })
+    .await;
+    assert_eq!(letters, words.iter().map(|word| word.len()).sum::<usize>());
+    println!("{letters} letters counted by {} fibers", words.len());
 }`;
 
-// Third code example: Saga Compensation
-export const codeExampleSaga = `use asupersync::{Cx, Outcome, Saga};
+// The same seed replays the same execution (examples/deterministic_test.rs).
+export const codeExampleLab = `use asupersync::lab::{LabRunReport, run_async_under_lab};
+use asupersync::prelude::*;
 
-async fn provision_user(cx: &Cx, email: String) -> Outcome<()> {
-    let saga = Saga::begin(cx).await;
+fn main() {
+    let (total, report) = fanout(7);
+    assert_eq!(total, fanout(7).0, "same seed must replay identically");
+    assert!(report.quiescent, "region close implies quiescence");
+    assert!(report.invariant_violations.is_empty(), "nothing leaked");
+    println!("deterministic: replayed {total} under seed 7, quiescent, 0 violations");
+}
 
-    // Step 1: Create account (monotone — no barrier needed)
-    let account = saga.step(
-        || db::create_account(&email),     // forward
-        |a| db::delete_account(a.id),      // compensate
-    ).await?;
-
-    // Step 2: Send welcome email (monotone — batched with step 1)
-    saga.step(
-        || mailer::send_welcome(&email),   // forward
-        |_| mailer::send_retraction(&email), // compensate
-    ).await?;
-
-    // Step 3: Charge card (non-monotone — CALM inserts barrier here)
-    saga.step(
-        || billing::charge(account.id, 9_99),  // forward
-        |_| billing::refund(account.id, 9_99), // compensate
-    ).await?;
-
-    // If cancelled, steps unwind in LIFO order:
-    // refund → retract email → delete account
-    saga.commit().await
+/// Sums a fan-out of 8 children under the deterministic lab runtime.
+fn fanout(seed: u64) -> (u32, LabRunReport) {
+    run_async_under_lab(seed, |cx| async move {
+        let mut set = JoinSet::in_cx(&cx);
+        for i in 0..8_u32 {
+            set.spawn(&cx, move |_| async move { Ok::<_, ()>(i) })
+                .expect("spawn");
+        }
+        let outcomes = set.join_all(&cx).await;
+        outcomes.into_iter().map(|o| o.expect("member ok")).sum()
+    })
 }`;
 
-// Changelog
+// Roadmap, from the upstream README.
 export const changelog: ChangelogEntry[] = [
   {
-    period: "Phase 1",
-    title: "Core Runtime & Region Model",
+    period: "Phase 0 · Complete",
+    title: "Deterministic single-thread kernel",
     items: [
-      "Designed the Region tree model with parent-child lifetime scoping",
-      "Implemented the three-phase cancel protocol (Request → Drain → Finalize)",
-      "Built the Cx capability context with spawn/IO/timer gates",
-      "Formal proofs for cancel-safety and region closure guarantees",
+      "Regions, tasks, and the cancellation state machine",
+      "A four-valued Outcome ordered by severity: Ok < Err < Cancelled < Panicked",
+      "The lab runtime: virtual time, seeded scheduling, trace capture",
     ],
   },
   {
-    period: "Phase 2",
-    title: "Linear Obligations & Permits",
+    period: "Phase 1 · Complete",
+    title: "Parallel scheduler and region heap",
     items: [
-      "Designed the Permit/Lease linear type system",
-      "Implemented compile-time must-use enforcement",
-      "Built the three consumption paths: Send, Complete, Abort",
-      "Added Spork (spawn + fork) for structured task hierarchies",
+      "Three-lane work-stealing scheduler: cancel, timed (EDF), and ready",
+      "Region heap with generation-checked handles, reclaimed when the region closes",
+      "Optional sharded runtime state with a fixed lock order",
     ],
   },
   {
-    period: "Phase 3",
-    title: "Three-Lane Scheduler",
+    period: "Phase 2 · Partial",
+    title: "I/O and protocols",
     items: [
-      "Implemented Cancel/Timed/Ready lane architecture",
-      "Built priority inversion prevention for cancel propagation",
-      "Designed quiescence detection for region closure",
-      "Benchmarked against Tokio's work-stealing scheduler",
+      "epoll reactor with optional io_uring; narrower BSD and Windows reactors",
+      "TCP, HTTP/1.1, HTTP/2, TLS, WebSocket, gRPC, and database clients",
+      "Native QUIC and HTTP/3; deployment and interop evidence still open",
     ],
   },
   {
-    period: "Phase 4",
-    title: "Lab Runtime & DPOR",
+    period: "Phase 3 · Complete",
+    title: "Actors and supervision",
     items: [
-      "Built deterministic executor with seed-controlled ordering",
-      "Implemented Dynamic Partial Order Reduction for systematic testing",
-      "Added replay capability for reproducing concurrency bugs",
-      "Integrated with cargo test for seamless developer experience",
+      "GenServers, actors, monitors, and links, on the native runtime and in the lab",
+      "Live supervision trees: one-for-one, one-for-all, rest-for-one",
+      "Restart intensity and backoff limits",
     ],
   },
   {
-    period: "Phase 5",
-    title: "Built-in Protocols & Ecosystem",
+    period: "Phase 4 · Core complete",
+    title: "Distributed structured concurrency",
     items: [
-      "Implemented cancel-correct TCP, HTTP/1.1, and WebSocket protocols",
-      "Built cancel-aware channels, mutexes, and semaphores",
-      "Added supervisor trees with restart policies",
-      "Published to crates.io with comprehensive documentation",
+      "Region-owned remote spawn over TCP with mutual TLS",
+      "Leases as obligations, an idempotency store, saga compensation",
+      "RaptorQ snapshot distribution with quorum recovery",
+    ],
+  },
+  {
+    period: "Phase 5 · Partial",
+    title: "Schedule exploration and formal tooling",
+    items: [
+      "Race-guided seed exploration that skips equivalent traces",
+      "TLA+ export of lab traces, checked by TLC",
+      "Lean checks six model invariants; there is no Rust refinement proof yet",
+    ],
+  },
+  {
+    period: "Phase 6 · Ongoing",
+    title: "Hardening",
+    items: [
+      "Benchmark, golden-output, flamegraph, and proof-note gates before each commit to main",
+      "Browser Edition packages, currently a release candidate",
+      "Cutting per-task overhead, measured against tokio in the same process",
     ],
   },
 ];
 
-// Glossary terms (alphabetically ordered)
+// Glossary terms, kept alphabetical. Tooltip looks them up by name.
 export const glossaryTerms: GlossaryTerm[] = [
-  { term: "Budget", short: "Countdown timer for task cleanups", long: "When cancellation strikes, tasks aren't killed instantly—they're given a 'Budget' (a specific amount of time, like 5 seconds) to clean up their mess during the Drain phase. If they run out of time, they are forcefully Finalized." },
-  { term: "Budget Algebra", short: "Product semiring for composing cancel budgets", long: "Cancel budgets compose algebraically as a product semiring. When regions nest, their budgets merge element-wise: min(deadlines), min(quotas), max(priority). This means the tightest deadline and smallest quota always win, while the highest priority propagates upward — guaranteeing consistent cancel timing across arbitrarily deep region hierarchies." },
-  { term: "CALM Analysis", short: "Identifies which operations need coordination", long: "Consistency As Logical Monotonicity — a principle that determines which operations can run coordination-free (monotone operations like Reserve and Send) and which require barriers (non-monotone operations like Commit and Release). Asupersync's Saga engine uses CALM to automatically batch consecutive monotone steps, inserting coordination barriers only where the math demands it." },
-  { term: "CALM Theorem", short: "Consistency As Logical Monotonicity", long: "A formal theorem from distributed systems theory: a program can be made eventually consistent without coordination if and only if it is monotone (i.e., it never retracts information). Asupersync applies this to classify operations: monotone operations (Reserve, Send, Acquire) can execute lock-free, while non-monotone operations (Commit, Release, RegionClose) require synchronization barriers." },
-  { term: "Cancel Contract", short: "Protocol compliance guarantee", long: "A strict promise that a given protocol (like TCP, HTTP, or channels) correctly implements the three-phase cancel protocol. All built-in Asupersync protocols satisfy this contract out of the box." },
-  { term: "Cancel Fuel", short: "Monotonically decreasing termination counter", long: "A counter that strictly decreases with each step of cancel propagation, serving as a termination proof. Like a rocket with a finite fuel tank — the cancel signal can only travel so far before the fuel runs out, mathematically guaranteeing that cancellation always finishes." },
-  { term: "Cancel-Correct", short: "Guaranteed safe shutdown", long: "In standard Rust, dropping a future might instantly stop it mid-execution, leaving connections open or data half-written. 'Cancel-Correct' means the runtime enforces a graceful 3-phase shutdown: tasks are asked to stop, given time to clean up, and finally swept away safely." },
-  { term: "CancelProtocol Oracle", short: "Verifies tasks obey the 3-phase cancel contract", long: "A specialized test oracle that monitors every task during Lab testing to ensure it correctly follows the three-phase cancel protocol. If a task tries to skip the Drain phase or ignores a cancel request, the oracle catches it immediately and reports the exact violation." },
-  { term: "Capability Gate", short: "Permission check on Cx", long: "A check on the Cx that determines whether a task has permission to perform a specific operation. Gates can be spawn, io, timer, or even custom application-defined capabilities." },
-  { term: "Capability Security", short: "Need-to-know task management", long: "A 'Zero Trust' model for concurrency. Tasks receive a 'Cx' token that explicitly grants them permissions—like the ability to spawn other tasks, use the network, or access timers. If a task is hijacked or buggy, its damage is contained to its specific capabilities." },
-  { term: "Capability Tier", short: "Hierarchical permission level for tasks", long: "A five-level permission hierarchy: FiberCap (compute-only), TaskCap (can spawn children), IoCap (network/filesystem access), RemoteCap (cross-machine communication), and SupervisorCap (can manage and restart other tasks). Each tier extends the one below it, enforcing the principle of least authority." },
-  { term: "Conformal Calibration", short: "Distribution-free prediction intervals for Lab metrics", long: "A statistical technique that produces valid prediction intervals without assuming any particular data distribution. The Lab runtime uses conformal calibration to set alert thresholds on runtime metrics — if a test run's timing falls outside the conformal band, the oracle flags it as anomalous, even if the underlying distribution is completely unknown." },
-  { term: "Cx", short: "Capability context token", long: "The magic key passed to every task. It controls what operations that task may perform. Spawning, I/O, timers, and other effects are gated by capabilities on the Cx. This enforces the principle of least authority." },
-  { term: "Coordination Barrier", short: "Sync point required before non-monotone operations", long: "A synchronization point that the Saga engine inserts before non-monotone operations (like Commit or Release). Monotone operations (like Reserve and Send) can execute without barriers because they're order-independent. CALM analysis determines exactly where barriers are needed, minimizing unnecessary synchronization." },
-  { term: "DPOR", short: "Dynamic Partial Order Reduction", long: "A smart algorithm used by the Lab Runtime. Instead of testing every single possible way tasks could overlap (which would take billions of years), DPOR only tests the interleavings that actually interact with each other. It finds the needle in the concurrency haystack mathematically." },
-  { term: "Drain Phase", short: "Graceful cleanup during cancellation", long: "The second phase of the cancel protocol. After a cancel request, tasks enter Drain where they can finish in-flight work, flush buffers, close connections, and release resources within their Budget." },
-  { term: "E-Process", short: "Anytime-valid statistical monitor using betting martingales", long: "A betting martingale that lets you continuously monitor a hypothesis and reject it the instant the evidence is strong enough — without any penalty for peeking. Unlike traditional p-values (which require a fixed sample size), an E-process stays valid no matter when you check it. Asupersync's Lab runtime uses E-processes to monitor three oracle invariants (task leak, obligation leak, quiescence) with guaranteed Type-I error control via Ville's inequality." },
-  { term: "EXP3 Scheduler", short: "Adaptive scheduling via exponential weights", long: "An online learning algorithm (Exponential-weight algorithm for Exploration and Exploitation) that adapts the scheduler's behavior based on observed cancellation patterns. The scheduler maintains 5 arms [4, 8, 16, 32, 64] representing cancel-streak thresholds. If certain thresholds consistently perform better, EXP3 shifts weight toward them with exploration rate γ=0.07, converging toward the optimal strategy over time." },
-  { term: "FiberCap", short: "Minimal capability: compute-only, no I/O", long: "The lowest capability tier. A task with only FiberCap can perform pure computation — no spawning, no I/O, no timers. It's the most restricted permission level, ideal for untrusted or sandboxed computations." },
-  { term: "Fiedler Value", short: "Eigenvalue that signals deadlock risk", long: "The second-smallest eigenvalue of the wait-graph's Laplacian matrix. When it's large, tasks flow freely (no bottleneck). When it drops near zero, the graph is about to split into disconnected components — meaning a deadlock is forming. Think of it as a 'traffic congestion score' for your concurrent system." },
-  { term: "Finalize Phase", short: "Final cleanup after draining", long: "The Finalize phase runs after Drain completes (or the Budget expires). It executes registered finalizers in LIFO order — similar to defer in Go but tightly integrated with the cancel protocol." },
-  { term: "Foata Fingerprint", short: "Canonical hash of concurrent execution traces", long: "A technique for canonicalizing concurrent execution traces using Foata normal form. Two interleavings that differ only in the order of independent (non-conflicting) operations produce the same fingerprint. DPOR uses this to detect when two different schedules are actually equivalent — pruning redundant exploration without missing real bugs." },
-  { term: "Fountain Code", short: "Rateless erasure code for data transfer", long: "A class of erasure codes where the sender generates a potentially infinite stream of encoded symbols, and the receiver can reconstruct the original data from any sufficient subset. Like a magic fountain — you just need to collect enough drops, regardless of which specific drops you catch." },
-  { term: "Hedge Algorithm", short: "Online learning for cancel-streak thresholds", long: "An online learning algorithm that tunes the scheduler's cancel-streak detection thresholds. When the runtime sees repeated cancellations in a region, Hedge adjusts how aggressively the scheduler pre-empts work there, minimizing wasted computation without over-reacting to transient patterns." },
-  { term: "IoCap", short: "Capability for network and filesystem access", long: "A mid-tier capability that extends TaskCap with permission to perform I/O operations: reading and writing files, opening network connections, and setting timers. Required for any task that needs to interact with the outside world." },
-  { term: "Lab Runtime", short: "Deterministic testing sandbox", long: "A virtual time-machine for your code. The Lab Runtime replaces the chaotic real-world scheduler with a perfectly controlled one. By feeding it a 'Seed', developers can reproduce insanely complex concurrency bugs (race conditions) every single time. Bye-bye flaky tests." },
-  { term: "Lyapunov Potential", short: "4-component energy function proving system progress", long: "A formal 'energy measure' composed of four terms: live task count, pending obligation age, draining region count, and deadline pressure. Like a ball's potential energy decreasing as it rolls downhill, this function strictly decreases with each scheduler step — mathematically proving the runtime always makes progress toward quiescence. The scheduler can tune weights (obligation-focused vs deadline-focused) to prioritize different workload patterns." },
-  { term: "Lease", short: "Scoped resource borrow", long: "Temporary ownership of a shared resource (like a database connection). Unlike standard Rust where drops are passive, if a Lease's owning Region is cancelled, the resource is actively and safely returned to its pool via the cancel protocol." },
-  { term: "Linear Obligations", short: "Mandatory return policy for resources", long: "A strict resource management system backed by Rust's type system. Think of it as a library book you must explicitly return. If a code path forgets to consume a resource (like a Permit or Lease), the program refuses to compile, preventing resource leaks at compile-time." },
-  { term: "Luby Transform", short: "Degree distribution for fountain codes", long: "A specific probability distribution that determines how many source symbols are combined into each encoded symbol in LT codes (a type of fountain code). Named after Michael Luby, it's the mathematical trick that makes fountain codes work efficiently with near-optimal overhead." },
-  { term: "Macaroon", short: "Decentralized capability token with attenuating caveats", long: "A bearer credential (inspired by Google's Macaroons paper) where anyone holding the token can add restrictions (caveats) but can never remove them. In Asupersync, capabilities are Macaroon-based: you can delegate a capability to a child task while attenuating it (e.g., adding a deadline, restricting to a specific Region, or limiting to N uses). The 8 caveat predicates include TimeBefore, TimeAfter, RegionScope, TaskScope, MaxUses, ResourceScope, RateLimit, and Custom." },
-  { term: "Mazurkiewicz Trace", short: "Equivalence class of concurrent interleavings", long: "A concept from concurrency theory: two execution traces are 'Mazurkiewicz equivalent' if they differ only in the order of independent (non-conflicting) operations. Asupersync's DPOR uses Mazurkiewicz traces to avoid redundantly testing schedules that produce identical outcomes — a massive reduction in the search space for concurrency testing." },
-  { term: "Martingale Progress Certificate", short: "Probabilistic proof of task completion", long: "A formal certificate based on supermartingale theory that proves tasks make monotonic progress toward completion. Like a ball rolling downhill — the certificate mathematically guarantees the ball can never roll back up, ensuring every task eventually finishes or is cleanly cancelled." },
-  { term: "Monotone Operation", short: "Order-independent operation that needs no coordination", long: "An operation whose result doesn't depend on the order it's executed relative to other monotone operations. Reserve, Send, Acquire, Renew, and CrdtMerge are all monotone in Asupersync's Saga engine. Because they're order-independent, they can be batched and executed without coordination barriers — a key performance optimization identified by CALM analysis." },
-  { term: "Obligation System", short: "Framework ensuring all resources are consumed", long: "The formal framework that tracks every Permit and Lease in the system and guarantees they are all explicitly consumed before their owning scope exits. If a resource escapes without being handled, the compiler or runtime catches it — no resource can silently leak." },
-  { term: "ObligationLeak Oracle", short: "Catches leaked Permits and Leases", long: "A test oracle that monitors for Permits or Leases that are dropped without being explicitly consumed (sent, completed, or aborted). When it catches one, it reports exactly which obligation was leaked and where it was created." },
-  { term: "Oracle", short: "Strict runtime referee", long: "A system component that watches over your application's execution. If an Oracle spots a broken promise—like a task ignoring a cancellation request, or a lease being dropped instead of properly returned—it halts the test and flags the exact line of code that violated the rules." },
-  { term: "Outcome", short: "Result type for async operations", long: "A super-powered Result enum. Instead of just Ok(T) or Err(E), Outcome explicitly includes Cancelled. It forces you to write code that consciously handles the scenario where an operation was interrupted." },
-  { term: "Permit", short: "Must-use lifecycle token", long: "When you spawn a task, you get a Permit. You can't just throw it away; you must explicitly wait for the task, detach it, or cancel it. It's how Asupersync enforces that you are always paying attention to the tasks you create." },
-  { term: "Product Semiring", short: "Algebraic structure for budget composition", long: "A mathematical structure where budgets compose element-wise using min and max operations. It's called a 'semiring' because it has two combining operations (like addition and multiplication, but using min and max instead). This gives budget composition clean algebraic properties: it's associative, commutative, and has identity elements." },
-  { term: "Quiescence", short: "When a region goes completely silent", long: "The state of a Region when all its tasks have finished, and no new tasks can possibly be created inside it. It's the equivalent of making sure everyone has left the building and the doors are locked before turning off the lights." },
-  { term: "RaptorQ", short: "RFC 6330 fountain code for erasure-coded transfer", long: "An advanced fountain code standardized in RFC 6330 that Asupersync uses for erasure-coded data transfer. It generates repair symbols so efficiently that receivers can reconstruct original data from any sufficient subset of symbols, with less than 1% overhead beyond the theoretical minimum." },
-  { term: "Region", short: "A structured concurrency scope", long: "A lifetime-bounded scope that owns tasks. When a Region closes, all tasks within it are cancelled (via the cancel protocol), awaited to completion, and their resources cleaned up. Regions nest hierarchically, forming a tree." },
-  { term: "Region Tree", short: "Hierarchy of nested scopes", long: "A family tree for tasks. Instead of tasks floating around independently, every task in Asupersync belongs to a 'Region'. When a parent Region is cancelled, the entire branch of child Regions and tasks is cleanly pruned from the bottom up. No task is ever orphaned." },
-  { term: "Saga", short: "Distributed operation with automatic compensation on failure", long: "A pattern for long-running operations that span multiple steps. Each step has a forward action and a compensating action. If any step fails (or cancellation arrives), the Saga automatically runs compensating actions for all completed steps in LIFO order. Asupersync's Saga engine classifies its 16 operation kinds into monotone and non-monotone using CALM analysis, minimizing the coordination overhead." },
-  { term: "Regret Bound", short: "Convergence guarantee for adaptive scheduling", long: "A mathematical proof that the EXP3 adaptive scheduler's cumulative 'regret' (difference between its performance and the best fixed strategy in hindsight) grows sublinearly. In practice, this means the scheduler converges to optimal behavior — it can't be fooled for long by adversarial workloads." },
-  { term: "Seed", short: "Deterministic execution parameter", long: "An integer that controls the Lab runtime's scheduling decisions. The exact same seed always produces the exact same task interleaving, enabling perfectly reproducible testing and bug replay." },
-  { term: "Small-Step Semantics", short: "Formal rules defining single computation steps", long: "A mathematical framework where each computation step is defined by a transition rule of the form \u27E8e, \u03C3\u27E9 \u2192 \u27E8e\u2032, \u03C3\u2032\u27E9 (expression e in state \u03C3 steps to expression e\u2032 in state \u03C3\u2032). Asupersync has 35 such rules covering spawning, cancellation, effect reservation, region closure, and more — each mechanized in Lean 4 for machine-checked correctness." },
-  { term: "Spectral Wait-Graph Analysis", short: "Eigenvalue-based deadlock prediction", long: "A technique that analyzes the eigenvalues of the wait-graph's Laplacian matrix to predict deadlocks before they fully form. Instead of waiting for tasks to actually freeze, it detects the mathematical signature of an emerging deadlock (the Fiedler value approaching zero) and intervenes proactively." },
-  { term: "Spork", short: "Spawn + Fork primitive", long: "A portmanteau of Spawn and Fork. It creates a new task while simultaneously branching off a new child Region. The new task inherits a subset of the parent's capabilities and is tightly bound to its new Region's lifecycle." },
-  { term: "Supermartingale", short: "Stochastic process proving termination", long: "A mathematical sequence of values that, on average, decreases over time. Asupersync uses supermartingales as termination proofs: by showing that a certain measure of 'remaining work' is a supermartingale, it mathematically proves that tasks always make progress and eventually complete." },
-  { term: "Supervisor", short: "Fault-tolerant task manager", long: "A task that monitors child tasks and applies restart policies when they fail. Crucially, Supervisors respect the cancel protocol: during Region cancellation, they stop restarting and allow children to drain gracefully." },
-  { term: "TaskLeak Oracle", short: "Detects tasks escaping their Region scope", long: "A test oracle that catches tasks which outlive their owning Region — the concurrent equivalent of a dangling pointer. If a task is still running after its Region has closed, the TaskLeak oracle flags it immediately, preventing 'zombie' tasks from silently consuming resources." },
-  { term: "Test Oracle", short: "Runtime correctness monitor for Lab testing", long: "A specialized runtime monitor that checks a specific class of correctness invariant during Lab testing. Each of the 17 built-in oracles watches for a different kind of bug — from resource leaks to protocol violations to budget overruns — acting as an automated auditor for your concurrent code." },
-  { term: "Three-Lane Scheduler", short: "Cancel / Timed / Ready priorities", long: "A traffic control system for tasks. The 'Cancel Lane' is the ambulance: it always gets priority so cleanups happen instantly. The 'Timed Lane' is for scheduled events, and the 'Ready Lane' handles normal traffic." },
-  { term: "Three-Phase Cancel Protocol", short: "Request \u2192 Drain \u2192 Finalize", long: "A rigorous lifecycle for stopping tasks. Phase 1: Request (signal intent to stop). Phase 2: Drain (allow tasks to finish writing to disk, closing network sockets, etc.). Phase 3: Finalize (force-release all remaining resources). This prevents the 'silent drop' problem." },
-  { term: "Transition Rule", short: "One formal rule in the small-step semantics", long: "A single rule in the small-step operational semantics that defines how one kind of computation step works. For example, the SPAWN rule defines what happens when a task is created, and the CANCEL-PROPAGATE rule defines how cancellation flows through the Region tree. Asupersync has 35 such rules, all mechanized in Lean 4." },
-  { term: "Two-Phase Effect", short: "Reserve/commit pattern preventing partial side-effects", long: "A pattern where side effects are split into two stages: Reserve (stage the effect, making it reversible) and Commit (apply it permanently). If cancellation arrives between Reserve and Commit, the reservation is automatically rolled back. Think of it like a bank placing a hold on your account before transferring — if the transfer is cancelled, the hold is simply released." },
-  { term: "Wait-Graph", short: "Directed graph of task dependencies", long: "A directed graph where nodes are tasks and edges represent 'task A is waiting on task B'. The runtime maintains this graph in real time and uses spectral analysis on its Laplacian matrix to detect deadlocks before they fully form." },
-  { term: "GenServer", short: "Generic Server for stateful actors", long: "A battle-tested server pattern borrowed from Erlang/OTP used to encapsulate state, handle concurrent requests, and manage a mailbox. In Asupersync, GenServers are supercharged with compile-time Reply Obligations, meaning a server can mathematically never 'forget' to respond to a client." },
-  { term: "Mailbox", short: "Message queue for actor tasks", long: "The receiving queue for a GenServer. While standard Erlang uses unbounded mailboxes that can silently grow until the system runs out of memory and crashes, Asupersync mailboxes are explicitly bounded and enforce backpressure safely." },
-  { term: "Monotone Operation", short: "Coordination-free action", long: "An operation that only ever adds information (like appending an item to a set or moving forward in a state machine). Because it never relies on checking if something is 'empty' or 'missing', it can execute concurrently without any locks. It is infinitely scalable." },
-  { term: "Non-Monotone Operation", short: "Barrier-requiring action", long: "An operation that checks a threshold or relies on negation (e.g., 'close this region only if zero tasks remain'). Because it must ensure no other thread is secretly adding a task while it checks, it fundamentally requires a heavy synchronization lock to execute safely." },
+  { term: "Ambient Authority", short: "Effects a task can perform without being handed the right to", long: "The ability to open a socket, read the clock, or spawn a task just because a global runtime is reachable. Asupersync routes runtime-managed effects through Cx instead. One of the six invariants Lean checks on the abstract model is \"no ambient authority\". In the Rust code the boundary is narrower: host-boundary helpers such as OS entropy for temporary file names stay outside it and are documented as such." },
+  { term: "Budget", short: "Deadline, poll quota, cost quota, and priority for a piece of work", long: "A small Copy struct: an optional absolute deadline, a poll quota, an optional abstract cost quota, and a priority from 0 to 255. Scopes and tasks carry one, and nested budgets combine with meet, so the tighter constraint always wins. On the production runtime, cleanup budgets are advisory: a task that runs past its budget is not killed." },
+  { term: "Budget Algebra", short: "How nested budgets combine", long: "meet(a, b) takes the earlier deadline, the smaller poll quota, the smaller cost quota, and the higher priority. Because each component is a min or a max, the operation is associative and commutative, so it doesn't matter in which order nested scopes apply their limits. A child can never end up with a looser budget than the scope it runs in." },
+  { term: "CALM Analysis", short: "Sorting saga steps into coordination-free and barrier-requiring", long: "Consistency As Logical Monotonicity applied to obligations. Asupersync's saga operations come in 16 kinds: 7 are monotone (Reserve, Send, Acquire, Renew, Delegate, CrdtMerge, CancelRequest) and 9 are not (Commit, Abort, Recv, Release, RegionClose, CancelDrain, MarkLeaked, BudgetCheck, LeakDetection). MonotoneSagaExecutor merges runs of monotone steps with a lattice join and puts a coordination barrier before each non-monotone one." },
+  { term: "CALM Theorem", short: "Consistency As Logical Monotonicity", long: "A result from distributed systems (Hellerstein and Alvaro): a program has a consistent, coordination-free implementation exactly when it is monotone, meaning it never has to retract a conclusion it already drew. Asupersync uses it to decide which saga steps can be batched without synchronization." },
+  { term: "Cancel Potential", short: "The quantity Lean uses to prove the cancel protocol terminates", long: "In the Lean model, a task in cancelRequested has potential mask + 3, cancelling 2, finalizing 1, and completed 0. Every protocol step lowers it, so a cancelled task completes in exactly mask + 3 steps, with the mask depth capped at 64. This is a per-task termination proof about the model; it says nothing about a task that never reaches a cancellation point." },
+  { term: "Cancel-Correct", short: "Cancellation that doesn't lose work or leak resources on covered paths", long: "Cancelling a task asks it to stop instead of dropping it mid-poll. The task runs to its next cancellation point, does its own async cleanup, and can return a value; finalizers run; the outcome is Cancelled(reason). Covered surfaces like channel sends use reserve/commit so a cancelled send never half-happens. Partial I/O such as read_exact and write_all states its own, weaker contract." },
+  { term: "Cancellation Point", short: "Where a task notices it has been cancelled", long: "cx.checkpoint() returns an error once cancellation has been requested, and cancel-aware awaits such as channel receives and lock acquisitions return early the same way. A task that never reaches one is never forcibly stopped, and it holds up its region's close. Loops that do real work should call cx.checkpoint()." },
+  { term: "CancelProtocol Oracle", short: "Checks that tasks follow the cancellation state machine", long: "The cancellation_protocol oracle, one of the nine the lab runtime feeds on every run. It watches each task's transitions through CancelRequested, Cancelling, Finalizing, and Completed and reports any skipped or out-of-order step." },
+  { term: "CancelReason", short: "Why a task was cancelled, with the cause chain", long: "Carries a CancelKind (User, Timeout, Deadline, PollQuota, CostBudget, FailFast, RaceLost, ParentCancelled, ResourceUnavailable, Shutdown, LinkedExit), where it came from, and a bounded chain of causes. The error from cx.checkpoint() carries it, so a joiner can tell why a task stopped. Kinds are ordered by severity, and cleanup budgets shrink as severity rises." },
+  { term: "Capability Gate", short: "The check before a runtime-managed effect", long: "Before spawning, reading time, drawing randomness, doing I/O, or talking to a remote node through Cx, the runtime checks the context's capability set. A context narrowed with Cx::restrict can't widen itself again. Most plain I/O entry points such as TcpStream::connect check the calling task's context and refuse with ASUP-E009 when the IO capability is missing." },
+  { term: "Capability Row", short: "The five effects a Cx can carry", long: "CapSet<SPAWN, TIME, RANDOM, IO, REMOTE> is a type-level record of which effects a context may perform. Cx::restrict narrows it to a subset, and sealed traits such as HasSpawn and HasIo let a function require a capability in its signature. Separately, Macaroon tokens can attenuate a context at runtime with caveats." },
+  { term: "Capability Security", short: "Effects go through an explicit context", long: "Instead of reading a global runtime from thread-local state, async functions take &Cx, and spawning, timers, randomness, tracing, and runtime-managed I/O go through it. You can see what a function is able to do from its signature, and swapping the Cx swaps the interpretation: production, lab, or distributed. It is enforced by the runtime, not proven by the type system." },
+  { term: "Conformal Calibration", short: "Distribution-free anomaly thresholds for lab runs", long: "Split conformal prediction over oracle-report metrics across explored seeds. With the default alpha of 0.05, the prediction set covers a new exchangeable run with probability at least 95%, whatever the underlying distribution. It's opt-in through ScheduleExplorer::with_conformal_calibration, which lists seeds whose metrics fall outside the set even when no invariant failed." },
+  { term: "Coordination Barrier", short: "A sync point before a non-monotone saga step", long: "MonotoneSagaExecutor runs consecutive monotone steps as one coordination-free batch and inserts a barrier before each non-monotone step such as Commit or Release. The number of barriers is exactly the number of non-monotone steps in the plan." },
+  { term: "Cx", short: "The capability context every async function receives", long: "Cx is how a task spawns children, checks for cancellation, reads its budget and the current time, draws randomness, and records traces. It belongs to a region, so anything spawned through it is owned by that region. A test can hand in a lab Cx and the same code runs on virtual time." },
+  { term: "Discounted UCB1", short: "The opt-in adaptive cancel-streak selector", long: "With enable_adaptive_cancel_streak(true), each worker picks its cancel-streak limit from {4, 8, 16, 32, 64} with a discounted upper-confidence-bound bandit, updated every 128 dispatches from a reward mixing Lyapunov decrease, fairness, and deadline pressure. It is deterministic (no RNG, no wall clock). It is off by default: measured against the fixed limit of 16, it didn't win on cancel-heavy work and was 1–29% slower elsewhere." },
+  { term: "DPOR", short: "Dynamic partial-order reduction, as used here: race-guided search", long: "Classic DPOR explores one schedule per class of equivalent interleavings. Asupersync's explorer borrows the ideas: it detects races with vector clocks, derives new seeds that target them, and skips runs whose Foata fingerprint it has already seen. It doesn't backtrack to an exact prefix, so it is useful bug-finding machinery rather than a proof that every class was covered." },
+  { term: "Drain Phase", short: "The cancelled task finishing its own cleanup", long: "After a cancel request is acknowledged, the task is Cancelling: it runs its own async cleanup, can still await, and can still produce a value. The scheduler gives cancelling tasks priority on the cancel lane. Drain ends when the task's future completes." },
+  { term: "E-Process", short: "A test statistic you can check after every run", long: "A nonnegative supermartingale under the null hypothesis. By Ville's inequality, the chance it ever exceeds 1/α is at most α, so you can look after every observation without inflating the false-alarm rate. The lab's standard monitor tracks task_leak, obligation_leak, and quiescence; each observation is that oracle's own verdict for a run, so it summarizes violation rates across seeds rather than finding new bugs." },
+  { term: "EXP3", short: "Adversarial bandit used by ATP's RaptorQ transport", long: "Exponential weights for exploration and exploitation. ATP's opt-in adaptive RaptorQ adapter uses it to choose a block size and fan-out, with η = 0.1 as both the exploration mix and the learning rate. It is not the scheduler's selector; that one is discounted UCB1." },
+  { term: "Fiber", short: "A borrowing future that runs inside the calling task", long: "cx::fiber::scope(|s| …) runs fibers concurrently on the calling task's thread. They can borrow from the task's stack (no 'static bound), each has its own cancellation, a panicking fiber cancels its siblings, and the scope waits for all of them. A fiber costs about what a tokio task does. They are concurrent, not parallel." },
+  { term: "Fiedler Value", short: "Algebraic connectivity of the wait graph", long: "The second-smallest eigenvalue of a graph's Laplacian. It's zero exactly when the graph is disconnected and small when the graph has a bottleneck. Asupersync's spectral health monitor tracks its trend on the live wait graph as one early-warning signal. A falling value is a topology signal, not proof of a deadlock." },
+  { term: "Finalize Phase", short: "Finalizers run, masked from further cancellation", long: "Once a cancelled task's future completes, the runtime runs its registered finalizers with cancellation masked, then publishes the terminal outcome. Region close works the same way at a larger scale: children first, then the region's finalizers, then Completed." },
+  { term: "Foata Fingerprint", short: "A canonical hash of an execution up to reordering", long: "Two traces that differ only by swapping adjacent independent events are equivalent (Mazurkiewicz equivalence). Foata normal form picks one canonical representative by grouping events into layers. Hashing it gives a fingerprint the schedule explorer uses to skip runs that are equivalent to one it has already seen." },
+  { term: "Fountain Code", short: "A rateless erasure code", long: "The sender can produce as many encoded symbols as it likes, and the receiver rebuilds the data from any sufficient set of them, regardless of which ones arrived. Lost packets cost bandwidth instead of round trips. RaptorQ is the standardized one." },
+  { term: "Futurelock", short: "A task holding obligations that has stopped making progress", long: "The lab runtime flags a task that still holds pending obligations but hasn't been polled for longer than futurelock_max_idle_steps, for example one parked while holding a semaphore permit. It emits a FuturelockDetected trace event with the task, region, and held obligations, and can panic on the spot." },
+  { term: "GenServer", short: "An OTP-style stateful server", long: "A task that owns state and handles call, cast, and info messages from a bounded mailbox, spawned with cx.spawn_gen_server. Each call hands the server a Reply that wraps a tracked obligation: the server must send or abort it. Dropping it unanswered panics outside of cancellation and unwinding, and the lab's reply_linearity oracle checks the same rule. This is enforced at runtime, not by the compiler." },
+  { term: "Hedge", short: "Start a backup request after a delay; first answer wins", long: "Scope::hedge starts the primary, waits a delay, starts a backup if the primary hasn't answered, and returns whichever finishes first, then aborts and joins the other. The standalone hedge() future drops the loser instead." },
+  { term: "IoCap", short: "The I/O capability trait", long: "A trait object for I/O authority. Production code uses the real one; the lab substitutes LabIoCap, which is how virtual TCP and other deterministic I/O get in without changing call sites." },
+  { term: "JoinSet", short: "Dynamic fan-out owned by one region", long: "JoinSet::in_cx(cx) or JoinSet::new(&scope) collects tasks spawned at runtime. join_next, join_all, and cancel_all all keep ownership of the drain, so nothing in the set outlives it unnoticed. join_all returns outcomes in spawn order." },
+  { term: "Lab Runtime", short: "The deterministic test runtime", long: "Runs async code on virtual time with a seeded scheduler, so the same seed reproduces the same schedule. It captures traces, injects cancellation and chaos deterministically, detects futurelocks, writes crashpacks for failing runs, and checks oracles. Concurrency bugs become reproducible test failures instead of flakes." },
+  { term: "Lease", short: "A time-bounded claim that counts as an obligation", long: "Remote leases are obligation-backed: they must be renewed or allowed to expire, and a region can't close while one is unresolved. Name leases in the Spork registry are reserve/commit tokens that panic if dropped unresolved, but region close doesn't wait for them yet." },
+  { term: "Linear Obligations", short: "Things that must be resolved exactly once", long: "Linear logic's rule applied to permits, acks, and leases. Rust's type system is affine (values can be dropped), so Asupersync enforces the \"exactly once\" part at runtime: #[must_use], drop behavior, an obligation table, and leak oracles. A forgotten obligation is reported loudly at region close or by the lab, not caught by the compiler." },
+  { term: "Luby Transform", short: "The first practical fountain code", long: "LT codes combine random subsets of source symbols, with the subset size drawn from a carefully shaped degree distribution (Michael Luby, 2002). RaptorQ adds a precode on top so decoding needs only a small, fixed overhead." },
+  { term: "Lyapunov Potential", short: "A weighted measure of outstanding work", long: "V = 1.0·live tasks + 5.0·total obligation age + 3.0·draining regions + 2.0·deadline pressure, with those default weights. The optional Lyapunov governor uses it to steer lane ordering so that V tends not to increase. The governor is off by default." },
+  { term: "Macaroon", short: "A bearer token that can only gain restrictions", long: "An HMAC-SHA256 chained token: each added caveat re-keys the signature, so anyone can attenuate a token but nobody can remove a caveat. Asupersync's caveats are TimeBefore, TimeAfter, RegionScope, TaskScope, MaxUses, ResourceScope (a glob), RateLimit, and Custom. Cx::attenuate applies them to a context. Checking spawns against a macaroon is opt-in via RuntimeBuilder::with_spawn_authorization_key." },
+  { term: "Mailbox", short: "A bounded message queue for an actor or server", long: "Actors and GenServers receive messages through a mailbox with a fixed capacity, so a slow consumer applies backpressure instead of growing without bound. The capacity is the second argument to spawn_actor and spawn_gen_server." },
+  { term: "Mazurkiewicz Trace", short: "An execution modulo reordering of independent events", long: "If two adjacent events touch different resources, swapping them can't change the result. Mazurkiewicz traces are the equivalence classes this swapping produces. The lab treats executions this way so it can recognize two schedules as the same behavior." },
+  { term: "Monotone Operation", short: "A step that only adds information", long: "An operation whose effect never has to be retracted, so its order relative to other monotone operations doesn't matter. In Asupersync's saga model the monotone kinds are Reserve, Send, Acquire, Renew, Delegate, CrdtMerge, and CancelRequest. Runs of them can be merged without coordination." },
+  { term: "Non-Monotone Operation", short: "A step that depends on absence or finality", long: "An operation such as Commit, Release, or RegionClose that relies on knowing nothing else will arrive, like closing a region only if zero tasks remain. Those need a coordination barrier first. Nine of the sixteen saga operation kinds are non-monotone." },
+  { term: "Obligation System", short: "The runtime's table of permits, acks, and leases", long: "When a task reserves a channel slot, takes a semaphore permit, or holds a lease through a runtime-built Cx, the runtime records an obligation. Sending, releasing, or aborting resolves it. A region can't close with unresolved registered obligations, and the obligation_leak oracle names any that escape, by kind and holder." },
+  { term: "ObligationLeak Oracle", short: "Reports permits that escaped unresolved", long: "The obligation_leak oracle. If a permit escapes its task, for example through mem::forget, the oracle reports its kind (such as SendPermit) and its holder. On-ramp level 3 leaks one on purpose to show the report." },
+  { term: "Oracle", short: "A lab-runtime invariant check", long: "A monitor that inspects runtime state after a lab run and reports pass or fail for one invariant. There are 24 built in; the lab runtime feeds 9 of them from its own state today (task leak, obligation leak, quiescence, loser drain, finalizer, region tree, deadline monotonicity, cancellation protocol, DOWN order). The other 15 report as passed and are counted as not fed." },
+  { term: "Outcome", short: "A four-valued result: Ok, Err, Cancelled, Panicked", long: "Outcome<T, E> keeps cancellation and panics separate from ordinary errors. The variants are ordered by severity, Ok < Err < Cancelled < Panicked, and combinators aggregate with that order, so a worse outcome is never hidden by a better one. HTTP layers map them to 200, 4xx/5xx, 499, and 500." },
+  { term: "Permit", short: "A reservation you must commit or abort", long: "tx.reserve(&cx).await gives you a permit for one slot of channel capacity. permit.send(value) commits it; dropping it aborts the reservation and frees the slot. Reserving is cancel-safe, which is how a cancelled send avoids losing or half-sending a message." },
+  { term: "Product Semiring", short: "The algebra behind budget composition", long: "Each budget component lives in its own min- or max-based algebra, and a budget is the product of those. The upstream docs call it semiring-like: what matters in practice is that meet is associative, commutative, and idempotent, so nested limits compose without surprises." },
+  { term: "Progress Certificate", short: "Diagnostics for whether a drain is converging", long: "Tracks the potential during a drain and labels the phase: warmup, rapid_drain, slow_tail, stalled, or quiescent. It also computes Azuma and Freedman concentration bounds, which at the current horizon are the trivial bound 1, so the phase labels carry the signal. The HTTP/1 and HTTP/2 graceful-drain supervisor uses it; region close does not." },
+  { term: "Quiescence", short: "Nothing left running in a region", long: "A region is quiescent when every task it owns has finished, every finalizer has run, and every registered obligation is resolved. Region close waits for quiescence, which is what \"no orphan tasks\" means in practice." },
+  { term: "RaptorQ", short: "The RFC 6330 fountain code", long: "A systematic fountain code: the first symbols are the source data itself, and repair symbols can be generated without limit. With K source symbols, receiving K usually suffices and K + 2 almost always does. Asupersync's implementation is deterministic, with a policy-driven decode planner and optional SIMD GF(256) kernels." },
+  { term: "Region", short: "The scope that owns tasks", long: "Every task belongs to a region, and regions nest into a tree. Closing a region cancels whatever is still running in it, waits for those tasks to finish, runs finalizers, and resolves obligations before it reports done. Tasks spawned through a Cx belong to that Cx's region; tasks spawned through a RuntimeHandle belong to the root region." },
+  { term: "Region Tree", short: "The hierarchy of regions", long: "Regions form a tree rooted at the runtime's root region. Cancelling a region propagates down to its subregions and tasks; completion propagates up. The region_tree oracle checks the tree's structure on every lab run." },
+  { term: "Saga", short: "Multi-step work with compensation", long: "Each step has a forward action and a compensating action; if a later step fails, completed steps are compensated in reverse order. remote::Saga provides this for distributed workflows. Separately, the obligation saga planner uses CALM analysis to batch monotone steps between coordination barriers." },
+  { term: "Scope", short: "A handle for spawning into a region", long: "cx.scope() gives you a Scope for the current region; scope.region(…) opens a child region that must reach quiescence before it returns. Scopes also host the drain-correct combinators: race, timeout, hedge, quorum, first_ok, pipeline, and map_reduce." },
+  { term: "Seed", short: "The number that fixes a lab schedule", long: "The lab scheduler's choices come from a seeded deterministic RNG, so the same seed reproduces the same interleaving, timer order, and chaos injections. A failing seed is a reproducible bug report." },
+  { term: "Small-Step Semantics", short: "The formal rules the runtime is designed against", long: "Rules of the form ⟨e, σ⟩ → ⟨e′, σ′⟩. The spec has 23 core rules (spawn, scheduling, the cancel protocol, region close, reserve/commit/abort, join, tick) plus 10 for distributed dedup and sagas. Lean's Step relation has 22 constructors, and the Lean project proves 189 theorems about it with no sorry. That is a proof about the model, not about the Rust code." },
+  { term: "Spectral Wait-Graph Analysis", short: "Early-warning diagnostics on the wait graph", long: "Treats the live wait graph as a signal: the Fiedler value trend, spectral gap, and a stack of nonparametric indicators, calibrated with split conformal bounds and an anytime-valid e-process, give a severity of none, watch, warning, or critical. It runs when Diagnostics::analyze_structural_health is called, or continuously only with the opt-in governor. It is advisory, not a deadlock proof." },
+  { term: "Spork", short: "Asupersync's OTP-style layer", long: "Supervision, a name registry, and actors on top of regions, obligations, and explicit cancellation: GenServers, supervisors, links, monitors, process groups, and AppSpec for declarative topologies. Processes always belong to a region and can't be detached, and restart and DOWN-message order is deterministic under the lab runtime." },
+  { term: "Supermartingale", short: "A process that doesn't increase on average", long: "A sequence whose expected next value, given the past, is at most its current value. Nonnegative supermartingales are the backbone of e-processes: Ville's inequality bounds the chance one ever climbs above 1/α." },
+  { term: "Supervisor", short: "Restarts failed children by policy", long: "A Spork supervisor compiles a restart topology over regions: boot order, dependencies, and shutdown budgets. Run live with CompiledSupervisor::bind_managed, it cancels and drains a failed child, then restarts it one-for-one, one-for-all, or rest-for-one, within shared intensity and backoff limits." },
+  { term: "TaskHandle", short: "What spawning returns", long: "TaskHandle<T> is the handle for a spawned task. handle.join(cx).await returns Result<T, JoinError>, and JoinError keeps cancellation and panic apart. The task is owned by its region whether or not you join it." },
+  { term: "TaskLeak Oracle", short: "Reports tasks still alive after their region closed", long: "The task_leak oracle, fed on every lab run. A task that outlives its region would be an orphan, the bug structured concurrency is meant to rule out." },
+  { term: "Test Oracle", short: "An invariant check the lab runs for you", long: "See Oracle. Besides the nine fed checks, the registry includes oracles for channel atomicity, waker dedup, actors, supervision, mailboxes, reply linearity, and registry leases that aren't wired into the lab runtime yet." },
+  { term: "Three-Lane Scheduler", short: "Cancel, timed, and ready queues", long: "Cancelling tasks go to the cancel lane, deadline-driven tasks to the timed lane (earliest deadline first), everything else to the ready lane. Cancel preemption is bounded: with the default cancel_streak_limit of 16, ready or timed work gets a slot within 17 dispatches per worker, widened to 32 while draining." },
+  { term: "Three-Phase Cancel Protocol", short: "Request → drain → finalize", long: "A task moves Running → CancelRequested → Cancelling → Finalizing → Completed(Cancelled). The request propagates down the region tree; the task acknowledges it at a cancellation point and drains its own work; finalizers run masked; then the runtime publishes the outcome. Nothing in it can stop a task that never checks in." },
+  { term: "Transition Rule", short: "One rule of the small-step semantics", long: "Each rule says how one kind of step changes the state, for example CANCEL-REQUEST marking a task and propagating to its region's children, or CLOSE-RUN-FINALIZER popping one finalizer. The rule names in the spec match constructors in Lean's Step relation, with a few merged or split." },
+  { term: "Two-Phase Effect", short: "Reserve first, commit separately", long: "For surfaces where cancellation could otherwise lose data, the effect is split: reserving is cancel-safe and commits nothing; the commit publishes. Channels work this way, as do TwoPhaseNetworkSend and graded obligation tokens. It isn't a general transaction system: there's no API that rolls back arbitrary side effects." },
+  { term: "Wait-Graph", short: "Who is waiting on whom", long: "A directed graph whose nodes are tasks and whose edges mean \"A is waiting on B\". The task inspector reports wait dependencies, and the spectral health monitor analyzes the graph's Laplacian when you ask it to." },
 ];
 
 // Flywheel
@@ -403,8 +730,8 @@ export interface FlywheelTool {
 
 export const flywheelDescription = {
   title: "The AI Flywheel",
-  subtitle: "A high-velocity AI engineering ecosystem that built Asupersync.",
-  description: "Asupersync wasn't built manually. It was architected and implemented through a recursive feedback loop of specialized AI agents, each handling a different layer of the runtime's formal verification, testing, and implementation pipeline.",
+  subtitle: "The agent tooling Asupersync was built with.",
+  description: "Jeffrey Emanuel wrote Asupersync with swarms of coding agents working in parallel on one repository. These are the tools that keep them coordinated: messaging and file reservations, an issue graph, session search, safety guards for destructive commands, and a bug scanner that runs before every commit.",
 };
 
 export const flywheelTools: FlywheelTool[] = [
@@ -714,67 +1041,67 @@ export const flywheelTools: FlywheelTool[] = [
 // FAQ
 export const faq: FaqItem[] = [
   {
-    question: "When should I use Asupersync instead of Tokio?",
-    answer: "Use Asupersync when correctness matters more than raw throughput. If you're building servers, pipelines, or systems where resource leaks, orphaned tasks, or silent cancellation failures would be bugs — Asupersync makes those bugs impossible by construction. Tokio is better for maximum single-server throughput where you're willing to handle cancellation safety manually.",
+    question: "When should I pick Asupersync over tokio?",
+    answer:
+      "When structured shutdown, obligation tracking, and reproducible concurrency bugs matter more to you than the last microsecond per task. It suits internal systems that can test their own adapters and cancellation boundaries against their workload. If you need the lowest per-task overhead, or drop-in compatibility with crates hard-wired to tokio, use tokio.",
   },
   {
-    question: "Can I use Tokio crates with Asupersync?",
-    answer: "Not directly — Asupersync uses its own runtime and async primitives. However, we provide bridge adapters for common Tokio ecosystem crates. The built-in protocol library covers most needs (TCP, HTTP, channels, mutexes) with cancel-correctness guarantees that Tokio wrappers can't provide.",
+    question: "How does performance compare to tokio?",
+    answer:
+      "It's slower per task. Every task carries a region membership, a cancellation state machine, and a terminal-result channel, and that bookkeeping costs time. In a same-process comparison from October 2026, spawn + join was 9–27× slower than tokio and an mpsc round trip 3–7× slower, while a yield on four workers was within 2×. Loopback TCP request/response was 1.1–1.7× slower, and the HTTP/1.1 server handled about half of hyper's requests per second. For fan-out inside one task, fiber::scope costs about the same as a tokio task. For most servers a few microseconds per task disappears next to network and disk latency; for millions of tiny tasks per second, it doesn't.",
   },
   {
-    question: "How does performance compare to Tokio?",
-    answer: "For I/O-bound workloads, Asupersync is within 5-15% of Tokio's throughput. The three-lane scheduler adds minimal overhead, and the cancel protocol only activates during actual cancellation. The Lab runtime (deterministic mode) is slower by design — it's for testing, not production.",
+    question: "Is it production-ready?",
+    answer:
+      "Not in the sense tokio is. It's pre-1.0 and experimental. The author's own projects run on it in production, and no independent production user is known. v0.5.0 is on crates.io; main carries the unreleased 0.6.0 line.",
   },
   {
-    question: "Is Asupersync production-ready?",
-    answer: "Asupersync is currently in v0.2.x — suitable for new projects and experimentation, but not yet battle-tested at scale. The core runtime has 12 formal proofs and extensive property-based testing. We recommend it for greenfield projects where you want correctness guarantees from day one.",
+    question: "Can I use tokio crates with it?",
+    answer:
+      "Not directly. A crate that needs tokio's runtime traits needs a boundary adapter, and the separate asupersync-tokio-compat crate has them for hyper, reqwest, tonic, tower, and axum stacks. The intended order is native Asupersync first, adapters only where a third-party crate insists on tokio. The default build of the runtime itself has no normal dependency on tokio.",
   },
   {
-    question: "What does 'cancel-correct' mean?",
-    answer: "Cancel-correct means that when a task is cancelled, it always gets a chance to clean up (Drain phase), its finalizers always run (Finalize phase), and resources are never silently leaked. In Tokio, dropping a future just... stops it. Buffers may not flush. Connections may not close. Locks may not release. Asupersync makes this impossible.",
+    question: "What does \"cancel-correct\" actually mean here?",
+    answer:
+      "Cancelling a task asks it to stop. The task keeps running until it reaches a cancellation point, either cx.checkpoint() or a cancel-aware await, then finishes its own async cleanup and can still return a value. The runtime runs finalizers and publishes Cancelled(reason) with the cause chain. Surfaces like channel sends use reserve/commit, so a cancelled send never half-happens. What it won't do is forcibly stop a task that never checks in: that task holds up its region's close.",
   },
   {
-    question: "How does the Lab runtime find bugs?",
-    answer: "The Lab runtime uses Dynamic Partial Order Reduction (DPOR) to systematically explore task interleavings. Given a concurrent program, it identifies which interleavings produce different outcomes and tests a representative subset. This is far more effective than random testing — it can find bugs that might take billions of random runs to hit.",
+    question: "Are cleanup budgets enforced?",
+    answer:
+      "On the production runtime they're advisory. A task that runs past its budget isn't killed; Runtime::shutdown_timeout bounds how long the caller waits for teardown. Budgets still compose predictably when scopes nest (the earlier deadline, the smaller quota, and the higher priority win), and the scheduler and lab use them.",
   },
   {
-    question: "Do I need to learn a new async syntax?",
-    answer: "No — Asupersync uses standard Rust async/await. The main difference is that your main function receives a Cx (capability context) parameter, and you use Region::open instead of bare task spawning. If you've used structured concurrency in Kotlin (coroutineScope) or Swift (TaskGroup), the patterns will feel familiar.",
+    question: "How much of my code has to change?",
+    answer:
+      "Async functions take &Cx. Spawns go through cx.spawn, a scope, or a JoinSet. sleep and timeout take the current time. Channel sends reserve first, or use the one-call send(). It's still ordinary async/await. The on-ramp covers it in four levels, each a complete program, starting from a plain #[main] that needs no runtime concepts at all.",
   },
   {
-    question: "What's the minimum Rust version?",
-    answer: "Asupersync requires Rust 1.75+ for async trait support and RPITIT. We track stable Rust and don't require nightly features.",
+    question: "What Rust version do I need?",
+    answer:
+      "Default features build on stable Rust 1.95 or newer, edition 2024. The one nightly-only piece is the ? operator on Outcome, from the default nightly-outcome-try feature; on stable it's simply inactive and the crate builds without it. The repository's own tests use the nightly pinned in rust-toolchain.toml.",
   },
   {
-    question: "What are Two-Phase Effects?",
-    answer: "Two-Phase Effects split side effects into Reserve (stage the change, making it reversible) and Commit (apply it permanently). Think of a bank transfer: first, the money is placed on hold (Reserve). If the operation is cancelled before it finishes, the hold is simply released — no money lost. Only after a cancellation checkpoint confirms no cancel is pending does the transfer actually go through (Commit). This prevents the half-executed side-effects that plague traditional async runtimes.",
+    question: "How does the lab runtime find bugs?",
+    answer:
+      "It runs your code on virtual time with a seeded scheduler, so a seed reproduces a schedule exactly. The schedule explorer derives new seeds from the races it detects and skips runs whose traces are equivalent to one it has seen, up to reordering of independent events. On every run, oracles check for task leaks, obligation leaks, quiescence, loser drain, finalizers, the region tree, deadline monotonicity, the cancellation protocol, and DOWN-message order. It's race-guided search, not exhaustive model checking: the number of classes explored is a campaign metric, not a completeness proof.",
   },
   {
-    question: "How does the spectral deadlock detector work?",
-    answer: "Asupersync maintains a real-time wait-graph — a directed graph where edges mean 'task A is waiting on task B'. The runtime continuously computes the Fiedler value (second-smallest eigenvalue of the graph's Laplacian matrix). When this value drops near zero, the graph is about to split into disconnected components — the mathematical signature of an emerging deadlock. Think of it like a traffic congestion sensor: it detects gridlock forming before cars actually stop, letting the scheduler intervene proactively.",
+    question: "What is formally verified?",
+    answer:
+      "There's a small-step operational semantics, and a Lean project checks six invariants of that abstract model: single-owner structured concurrency, quiescence at region close, the cancellation protocol, race loser drain, no obligation leaks, and no ambient authority. The Rust runtime hasn't been proved to refine the model. Lab traces can be exported to TLA+ and checked by TLC. Everything else is tests, oracles, and conformance suites.",
   },
   {
-    question: "What makes the formal semantics useful in practice?",
-    answer: "The 35 small-step transition rules aren't just academic exercises — they're mechanized in Lean 4, which means a computer has verified they're logically consistent. This bridges the gap between the spec document (what Asupersync should do) and the runtime implementation (what it actually does). When a bug is found, the formal rules precisely identify whether it's a spec error or an implementation error. It also enables automated property-based testing: the Lab runtime generates random programs and checks that every execution trace conforms to the formal rules.",
+    question: "Does it run in the browser?",
+    answer:
+      "Partly. The Browser Edition compiles to wasm32 and ships JS/TS packages (@asupersync/browser, with React and Next adapters) for the main thread and dedicated workers. They're a release candidate and not yet on npm. In the browser it isn't the native scheduler: it's a ledger of regions, scopes, and task handles over the host's own promises, with fetch, WebSocket, and WebTransport behind capabilities. There's a live WASM demo linked from the home page.",
   },
   {
-    question: "How do the 17 test oracles work together?",
-    answer: "Each oracle is an independent correctness monitor that watches for one specific class of bug during Lab testing. TaskLeak catches tasks that outlive their Region. ObligationLeak catches dropped Permits or Leases. CancelProtocol verifies the 3-phase shutdown is followed correctly. BudgetOverrun catches tasks that exceed their Drain budget. When you run a Lab test, all 17 oracles are active simultaneously — like having 17 specialized auditors reviewing every step of your concurrent program's execution.",
+    question: "Are the fancy algorithms on by default?",
+    answer:
+      "Mostly not. The adaptive cancel-streak selector (discounted UCB1) and the Lyapunov governor are opt-in; when the adaptive selector was measured against the fixed limit, it didn't win, so the fixed limit stays the default. The spectral wait-graph monitor is a diagnostic you call. E-processes, conformal calibration, and Foata fingerprints live in the lab runtime. They exist to make testing and debugging auditable, not to speed up the production scheduler.",
   },
   {
-    question: "How does Macaroon-based capability attenuation work?",
-    answer: "Capabilities in Asupersync are bearer tokens inspired by Google's Macaroons paper. The key property: anyone holding a capability can add restrictions (caveats) but can never remove them. When you delegate a capability to a child task, you can attenuate it — for example, adding a TimeBefore deadline, restricting it to a specific Region, limiting it to N uses, or applying a rate limit. There are 8 caveat predicates in total, including a Custom(key, value) escape hatch for application-specific restrictions. This means delegation is always safe: you can hand out capabilities freely, knowing they can only become more restricted, never less.",
-  },
-  {
-    question: "What are E-processes and why do they matter for testing?",
-    answer: "E-processes are a modern statistical technique (betting martingales) that let you continuously monitor a hypothesis and reject it the instant evidence is strong enough — without any penalty for 'peeking' at intermediate results. Traditional p-values require you to commit to a fixed sample size upfront. E-processes don't. The Lab runtime uses them to monitor three critical invariants (task leak, obligation leak, quiescence) during testing. Via Ville's inequality, if the E-value ever exceeds 1/α, you know with mathematical certainty that an invariant was violated — no matter when you checked.",
-  },
-  {
-    question: "How does Saga compensation handle distributed failures?",
-    answer: "When a multi-step operation spans several services (create account → send email → charge card), failure at any step triggers automatic LIFO compensation — unwinding completed steps in reverse order. What makes Asupersync's Saga engine special is CALM analysis: it classifies each of the 16 operation kinds as either monotone (coordination-free, like Reserve and Send) or non-monotone (barrier-required, like Commit and Release). Consecutive monotone steps are batched without synchronization, and barriers are inserted only before non-monotone steps. This minimizes coordination overhead while maintaining correctness.",
-  },
-  {
-    question: "What is the Lyapunov potential function?",
-    answer: "It's a 4-component 'energy measure' that the scheduler uses to formally prove the system always makes progress. The four components are: (1) live task count, (2) pending obligation age, (3) draining region count, and (4) deadline pressure. Like a ball rolling downhill, this function strictly decreases with each scheduler step — mathematically guaranteeing the runtime converges toward quiescence. The scheduler can tune the component weights: obligation-focused mode prioritizes clearing aged obligations, while deadline-focused mode prioritizes tasks approaching their deadlines.",
+    question: "Why the name?",
+    answer: "\"A super sync\": structured concurrency done right.",
   },
 ];
