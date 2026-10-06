@@ -65,10 +65,18 @@ function TimelinePanel({
       </div>
 
       {/* Timeline tracks */}
-      <div className="space-y-3">
+      <div>
+        {/* mode="wait" animates one child at a time, so the rows for a seed
+            share a single keyed wrapper: a new seed waits for the old rows. */}
         <AnimatePresence mode="wait">
-          {playing &&
-            tasks.map((task, index) => (
+          {playing && (
+            <motion.div
+              key={seed}
+              className="space-y-3"
+              exit={reducedMotion ? { opacity: 0 } : { opacity: 0, x: 12 }}
+              transition={{ duration: reducedMotion ? 0.1 : 0.3 }}
+            >
+            {tasks.map((task, index) => (
               <motion.div
                 key={`${seed}-${task.id}-${index}`}
                 initial={reducedMotion ? { opacity: 1 } : { opacity: 0, x: -24 }}
@@ -123,6 +131,8 @@ function TimelinePanel({
                 </div>
               </motion.div>
             ))}
+            </motion.div>
+          )}
         </AnimatePresence>
       </div>
 

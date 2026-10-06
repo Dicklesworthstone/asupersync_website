@@ -138,6 +138,7 @@ export default function RobotMascot({ className }: { className?: string }) {
         <motion.circle
           cx="60" cy="6" r="3"
           fill="#F97316"
+          initial={false}
           animate={isHovered ? { fill: "#FB923C", r: 4 } : { fill: "#F97316", r: 3 }}
         />
 

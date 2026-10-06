@@ -12,20 +12,16 @@ export default function GlowOrbits() {
   });
   const prefersReducedMotion = useReducedMotion();
 
+  // Cursor offset from the viewport center, in [-0.5, 0.5]. Starting at 0
+  // keeps the parallax at rest identical on server and client.
   const mouseX = useMotionValue(0);
   const mouseY = useMotionValue(0);
 
   const springX = useSpring(mouseX, { damping: 50, stiffness: 100 });
   const springY = useSpring(mouseY, { damping: 50, stiffness: 100 });
 
-  const parallaxX = useTransform(springX, (val) => {
-    if (typeof window === "undefined") return 0;
-    return (val / window.innerWidth - 0.5) * -60;
-  });
-  const parallaxY = useTransform(springY, (val) => {
-    if (typeof window === "undefined") return 0;
-    return (val / window.innerHeight - 0.5) * -60;
-  });
+  const parallaxX = useTransform(springX, (val) => val * -60);
+  const parallaxY = useTransform(springY, (val) => val * -60);
 
   const spectrum = ["#3B82F6", "#60A5FA", "#F97316", "#93C5FD", "#2563EB", "#FB923C", "#1D4ED8", "#38bdf8"];
 
@@ -34,8 +30,8 @@ export default function GlowOrbits() {
     if (!isIntersecting) return undefined;
 
     const handleMouseMove = (e: MouseEvent) => {
-      mouseX.set(e.clientX);
-      mouseY.set(e.clientY);
+      mouseX.set(e.clientX / window.innerWidth - 0.5);
+      mouseY.set(e.clientY / window.innerHeight - 0.5);
     };
     window.addEventListener("mousemove", handleMouseMove, { passive: true });
     return () => window.removeEventListener("mousemove", handleMouseMove);
