@@ -76,7 +76,11 @@ export default function GlowOrbits() {
         rootRef.current = node as HTMLDivElement;
         observerRef.current = node as HTMLDivElement;
       }}
-      style={prefersReducedMotion ? undefined : { x: parallaxX, y: parallaxY }}
+      // Always bind the motion values: branching on the reduced-motion
+      // preference here would render different markup on server and client.
+      // With reduced motion the mousemove listener never attaches, so the
+      // springs stay at rest and the transform is a no-op.
+      style={{ x: parallaxX, y: parallaxY }}
       className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
     >
       <div className="glow-ring absolute -top-[20%] -left-[10%] h-[60%] w-[60%] rounded-full blur-[120px]"

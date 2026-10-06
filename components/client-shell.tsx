@@ -41,7 +41,9 @@ export default function ClientShell({ children }: { children: React.ReactNode })
                 unrelated re-render. Enter-only fade, remounted per route via key. */}
             <motion.div
               key={pathname}
-              initial={prefersReducedMotion ? { opacity: 1 } : { opacity: 0 }}
+              // initial must not depend on the reduced-motion preference,
+              // which is unknown during SSR; a zero duration skips the fade.
+              initial={{ opacity: 0 }}
               animate={{
                 opacity: 1,
                 transition: {
