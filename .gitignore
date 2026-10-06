@@ -51,3 +51,7 @@ storage.sqlite3-*
 update_page.js
 .vercel
 .env*
+
+# Playwright output
+test-results/
+playwright-report/

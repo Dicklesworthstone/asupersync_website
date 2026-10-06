@@ -212,7 +212,9 @@ export default function RegionTreeViz() {
         setRegions((prev) =>
           prev.map((r) => (affectedSet.has(r.id) ? { ...r, status: "quiescent" } : r)),
         );
-        setGlobalStatus("Quiescent");
+        // Closing a subtree leaves the rest of the tree running; only closing
+        // the root makes the whole runtime quiescent.
+        setGlobalStatus(affectedSet.has("root") ? "Quiescent" : "Running");
         setBudgetActive(false);
         cancellingRef.current = false;
       }, quiescentTime);

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, type ComponentType, type ReactNode } from "react";
+import { Suspense, useEffect, type ComponentType, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import SectionShell from "@/components/section-shell";
@@ -358,7 +358,20 @@ function StatusBadge({ status }: { status: DemoStatus }) {
   );
 }
 
+// Sections renamed when their content was corrected; keep old links working.
+const RENAMED_ANCHORS: Record<string, ShowcaseDemoId> = {
+  "exp3-scheduler": "adaptive-scheduler",
+  "cancel-fuel": "cancel-potential",
+};
+
 export default function ShowcasePage() {
+  useEffect(() => {
+    const renamed = RENAMED_ANCHORS[window.location.hash.slice(1)];
+    if (!renamed) return;
+    window.history.replaceState(window.history.state, "", `#${renamed}`);
+    document.getElementById(renamed)?.scrollIntoView({ block: "start" });
+  }, []);
+
   return (
     <main id="main-content">
       <section className="relative pt-32 pb-16 overflow-hidden">
