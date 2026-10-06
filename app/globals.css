@@ -246,6 +246,17 @@ body::before {
 .spec-prose h3 { font-size: 1.25rem; }
 .spec-prose h4 { font-size: 1.1rem; color: #93c5fd; }
 
+.spec-prose :is(h1, h2, h3, h4) { scroll-margin-top: 6rem; }
+.spec-prose .heading-anchor {
+  margin-left: 0.4em;
+  color: #475569;
+  text-decoration: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.spec-prose :is(h1, h2, h3, h4):hover .heading-anchor,
+.spec-prose .heading-anchor:focus-visible { opacity: 1; }
+
 .spec-prose p { margin-bottom: 1.25em; }
 
 .spec-prose a {

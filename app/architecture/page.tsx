@@ -10,6 +10,7 @@ import RustCodeBlock from "@/components/rust-code-block";
 import Timeline from "@/components/timeline";
 import { Tooltip } from "@/components/tooltip";
 import { changelog, codeExample, labOracles } from "@/lib/content";
+import { specDocHref } from "@/lib/spec-docs";
 
 const OracleDashboardViz = dynamic(() => import("@/components/viz/oracle-dashboard-viz"), { ssr: false });
 const CancelStateMachineViz = dynamic(() => import("@/components/viz/cancel-state-machine-viz"), { ssr: false });
@@ -483,7 +484,7 @@ export default function ArchitecturePage() {
             </div>
             <p className="mt-4 text-sm text-slate-500">
               The full rule set, with proof sketches and the mapping to runtime state, is in the{" "}
-              <Link href="/spec-explorer" className="text-blue-400 hover:text-blue-300 underline underline-offset-2">
+              <Link href={specDocHref("formal-semantics")} className="text-blue-400 hover:text-blue-300 underline underline-offset-2">
                 formal semantics
               </Link>{" "}
               document.

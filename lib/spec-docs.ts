@@ -7,6 +7,11 @@ export interface SpecDoc {
   order: number;
 }
 
+/** Link to a mirrored doc in the spec explorer, optionally at a heading. */
+export function specDocHref(slug: string, hash?: string): string {
+  return `/spec-explorer?doc=${slug}${hash ? `#${hash}` : ""}`;
+}
+
 export const specCategories = [
   "Start Here",
   "Formal Semantics",

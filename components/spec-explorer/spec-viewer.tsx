@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ColumnDef, getCoreRowModel, getFilteredRowModel, useReactTable } from "@tanstack/react-table";
@@ -12,7 +13,7 @@ import {
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { cn } from "@/lib/utils";
-import { specDocs, specCategories, type SpecDoc, type SpecCategory } from "@/lib/spec-docs";
+import { specDocs, specCategories, specDocHref, type SpecDoc, type SpecCategory } from "@/lib/spec-docs";
 import { SyncContainer } from "@/components/sync-elements";
 import GlitchText from "@/components/glitch-text";
 import { Magnetic } from "@/components/motion-wrapper";
@@ -42,18 +43,54 @@ type SidebarItem =
 
 const UPSTREAM_BLOB = "https://github.com/Dicklesworthstone/asupersync/blob/main/";
 
+const slugByFilename = new Map(specDocs.map((doc) => [doc.filename, doc.slug]));
+
+// GitHub-style heading slug, so anchors copied from GitHub keep working.
+function headingSlug(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\- ]+/gu, "")
+    .replace(/ /g, "-");
+}
+
 // The docs are mirrored from the upstream repo, where they live under docs/
-// (the formal semantics sit at the repo root). Their relative links point at
-// source files and sibling docs in that tree, so resolve them against GitHub.
-function rewriteRelativeLinks(html: string, filename: string): string {
+// (the formal semantics sit at the repo root). Give headings ids, keep links
+// between mirrored docs inside the explorer, and resolve every other relative
+// link against GitHub.
+function postProcessDocHtml(html: string, filename: string): string {
   const base = filename === "asupersync_v4_formal_semantics.md" ? UPSTREAM_BLOB : `${UPSTREAM_BLOB}docs/`;
   const template = document.createElement("template");
   template.innerHTML = html;
+
+  const seen = new Map<string, number>();
+  for (const heading of template.content.querySelectorAll<HTMLHeadingElement>("h1, h2, h3, h4")) {
+    const slug = headingSlug(heading.textContent ?? "");
+    if (!slug) continue;
+    const count = seen.get(slug) ?? 0;
+    seen.set(slug, count + 1);
+    const id = count === 0 ? slug : `${slug}-${count}`;
+    heading.id = id;
+    const anchor = document.createElement("a");
+    anchor.href = `#${id}`;
+    anchor.className = "heading-anchor";
+    anchor.setAttribute("aria-label", `Link to this section`);
+    anchor.textContent = "#";
+    heading.append(anchor);
+  }
+
   for (const anchor of template.content.querySelectorAll<HTMLAnchorElement>("a[href]")) {
     const href = anchor.getAttribute("href") ?? "";
     if (href.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(href)) continue;
     try {
-      anchor.setAttribute("href", new URL(href, base).toString());
+      const resolved = new URL(href, base);
+      const target = resolved.pathname.split("/").pop() ?? "";
+      const slug = slugByFilename.get(target);
+      if (slug) {
+        anchor.setAttribute("href", specDocHref(slug, resolved.hash.slice(1) || undefined));
+        continue;
+      }
+      anchor.setAttribute("href", resolved.toString());
       anchor.setAttribute("target", "_blank");
       anchor.setAttribute("rel", "noopener noreferrer");
     } catch {
@@ -71,12 +108,22 @@ async function loadSpecDocHtml(filename: string, signal?: AbortSignal): Promise<
 
   const text = await res.text();
   const html = await marked.parse(text);
-  return rewriteRelativeLinks(DOMPurify.sanitize(html), filename);
+  return postProcessDocHtml(DOMPurify.sanitize(html), filename);
 }
 
 export default function SpecViewer() {
   const queryClient = useQueryClient();
-  const [activeDoc, setActiveDoc] = useState<SpecDoc | null>(null);
+  const searchParams = useSearchParams();
+  // The URL is the source of truth for the open doc, so links are shareable
+  // and back/forward move between docs.
+  const docParam = searchParams.get("doc");
+  const activeDoc = useMemo(() => specDocs.find((doc) => doc.slug === docParam) ?? null, [docParam]);
+  // Native pushState: the app router syncs it into useSearchParams without a
+  // navigation transition, which stalls against AnimatePresence mode="wait"
+  // when one open doc replaces another.
+  const setActiveDoc = useCallback((doc: SpecDoc | null) => {
+    window.history.pushState(null, "", doc ? specDocHref(doc.slug) : "/spec-explorer");
+  }, []);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<SpecCategory | "All">("All");
   const specColumns = useMemo<ColumnDef<SpecDoc>[]>(
@@ -157,7 +204,7 @@ export default function SpecViewer() {
 
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [activeDoc]);
+  }, [activeDoc, setActiveDoc]);
 
   return (
     <div className="min-h-[80vh]">
@@ -206,7 +253,7 @@ export default function SpecViewer() {
       </div>
 
       {/* Desktop: sidebar + panel */}
-      <div className="hidden lg:grid lg:grid-cols-[340px,1fr] gap-0">
+      <div className="hidden lg:grid lg:grid-cols-[340px_1fr] gap-0">
         <div className="border-r border-white/5 pr-0 overflow-y-auto max-h-[85vh] custom-scrollbar">
           <div className="pr-6">
             <Sidebar
@@ -507,8 +554,55 @@ function DocContent({
     );
   }
 
+  return <DocBody html={html} />;
+}
+
+function DocBody({ html }: { html: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  // The doc is rendered once per layout (mobile and desktop, one hidden by
+  // CSS), so ids repeat in the document. Resolve in-doc anchors within this
+  // copy, and keep links to other mirrored docs as client-side navigation.
+  const handleClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const anchor = (e.target as HTMLElement).closest("a");
+      const href = anchor?.getAttribute("href");
+      if (!anchor || !href) return;
+      if (href.startsWith("#")) {
+        const target = ref.current?.querySelector<HTMLElement>(`[id="${CSS.escape(decodeURIComponent(href.slice(1)))}"]`);
+        if (!target) return;
+        e.preventDefault();
+        target.scrollIntoView({ block: "start", behavior: "smooth" });
+        window.history.replaceState(window.history.state, "", href);
+      } else if (href.startsWith("/spec-explorer?")) {
+        e.preventDefault();
+        window.history.pushState(null, "", href);
+      }
+    },
+    []
+  );
+
+  // Once a doc renders, jump to the #heading in the URL if there is one;
+  // otherwise start the doc at its top.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const hash = decodeURIComponent(window.location.hash.slice(1));
+    const target = hash ? el.querySelector<HTMLElement>(`[id="${CSS.escape(hash)}"]`) : null;
+    if (target) {
+      target.scrollIntoView({ block: "start" });
+    } else {
+      el.closest(".custom-scrollbar")?.scrollTo({ top: 0 });
+    }
+  }, [html]);
+
   return (
+    // Clicks are delegated to the links inside the rendered markdown, which
+    // stay keyboard-reachable as ordinary anchors.
     <div
+      ref={ref}
+      onClick={handleClick}
       className="spec-prose pb-16"
       dangerouslySetInnerHTML={{ __html: html }}
     />

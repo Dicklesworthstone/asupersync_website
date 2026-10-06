@@ -305,7 +305,7 @@ export default function AgentFlywheel() {
         <CircuitTrace color={activeAccent} orientation="vertical" className="absolute left-2 top-[10%] bottom-[10%] h-[80%] z-20" />
         <CircuitTrace color={activeAccent} orientation="vertical" className="absolute right-2 top-[10%] bottom-[10%] h-[80%] z-20" />
 
-        <div className="grid lg:grid-cols-[1fr,1.5fr] xl:grid-cols-[1fr,1.8fr] gap-0 items-stretch">
+        <div className="grid lg:grid-cols-[1fr_1.5fr] xl:grid-cols-[1fr_1.8fr] gap-0 items-stretch">
           {/* THE REACTOR STAGE */}
           <div className="relative flex items-center justify-center p-6 md:p-12 border-r border-white/5 min-h-[500px] md:min-h-[700px] overflow-visible">
             <NeuralFragments />

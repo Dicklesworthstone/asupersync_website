@@ -6,6 +6,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import SectionShell from "@/components/section-shell";
 import RustCodeBlock from "@/components/rust-code-block";
 import RobotMascot from "@/components/robot-mascot";
+import { specDocHref } from "@/lib/spec-docs";
 import GlitchText from "@/components/glitch-text";
 import { SyncContainer } from "@/components/sync-elements";
 import {
@@ -202,7 +203,7 @@ export default function GettingStartedPage() {
           ))}
           <p className="text-slate-500 text-sm">
             The full walkthrough, with what each level&apos;s output means, is the{" "}
-            <Link href="/spec-explorer" className="text-blue-400 hover:text-blue-300 underline underline-offset-2">
+            <Link href={specDocHref("onramp")} className="text-blue-400 hover:text-blue-300 underline underline-offset-2">
               on-ramp guide
             </Link>{" "}
             in the spec docs.
@@ -300,8 +301,19 @@ export default function GettingStartedPage() {
           <a href={`${siteConfig.github}#feature-flags`} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline underline-offset-2">
             upstream README
           </a>
-          . Migrating an existing tokio service? Start with the integration guide&apos;s migration
-          playbook in the spec docs, and the repository&apos;s agent skill if you work with Claude Code or Codex.
+          . Migrating an existing tokio service? Start with the{" "}
+          <Link href={specDocHref("integration", "tokio-migration-playbook")} className="text-blue-400 hover:text-blue-300 underline underline-offset-2">
+            Tokio migration playbook
+          </Link>{" "}
+          and its{" "}
+          <Link href={specDocHref("integration", "migration-readiness-planner")} className="text-blue-400 hover:text-blue-300 underline underline-offset-2">
+            read-only readiness planner
+          </Link>
+          , and the repository&apos;s{" "}
+          <a href={`${siteConfig.github}/tree/main/skills/asupersync-mega-skill`} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline underline-offset-2">
+            agent skill
+          </a>{" "}
+          if you work with Claude Code or Codex.
         </p>
       </SectionShell>
 
