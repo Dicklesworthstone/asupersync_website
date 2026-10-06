@@ -15,3 +15,8 @@ last-touched
 
 # br fsqlite WAL-cert sidecars — per-machine runtime, like -wal/-shm
 *.db-wal-cert*
+
+# br recovery snapshots and fsqlite migration markers — per-machine runtime
+.br_recovery/
+*.fsqlite-migration-state
+beads.base.jsonl
