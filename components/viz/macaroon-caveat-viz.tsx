@@ -4,7 +4,8 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Key, ShieldAlert, ShieldCheck, Lock, Plus, Server } from "lucide-react";
 
-type Caveat = "read-only" | "time-limit" | "domain-restrict" | "max-uses";
+// Three of the eight caveat kinds, with concrete values for this demo.
+type Caveat = "resource-scope" | "time-before" | "region-scope";
 
 export default function MacaroonCaveatViz() {
   const [activeCaveats, setActiveCaveats] = useState<Set<Caveat>>(new Set());
@@ -35,13 +36,13 @@ export default function MacaroonCaveatViz() {
     setAttemptState("checking");
 
     const t1 = setTimeout(() => {
-      // Logic: If malicious, it gets blocked IF the right caveats are in place.
-      // For the viz, if it's a "malicious" attempt (e.g. POST to evil.com), 
-      // the 'domain-restrict' or 'read-only' caveat will block it.
+      // The "safe" check (api/orders, region 7, t = 20ms) satisfies every caveat.
+      // The "malicious" check (admin/keys, region 9, t = 120ms) fails each one,
+      // so it is rejected as soon as any caveat is present.
       let blocked = false;
-      
+
       if (type === "malicious") {
-        if (activeCaveats.has("domain-restrict") || activeCaveats.has("read-only") || activeCaveats.has("time-limit")) {
+        if (activeCaveats.has("resource-scope") || activeCaveats.has("time-before") || activeCaveats.has("region-scope")) {
            blocked = true;
         }
       }
@@ -62,7 +63,7 @@ export default function MacaroonCaveatViz() {
         <div>
           <h3 className="text-lg font-semibold text-white">Macaroon Capability Tokens</h3>
           <p className="text-sm text-slate-400 mt-1">
-            Pass attenuated capabilities to child tasks. They can add restrictions, but never remove them.
+            Any holder can add caveats before passing a token on. Removing one needs the root key.
           </p>
         </div>
       </div>
@@ -79,9 +80,9 @@ export default function MacaroonCaveatViz() {
           
           <div className="bg-[#020a14] border border-blue-500/30 rounded-lg p-3 w-full text-center">
              <div className="text-xs font-bold text-blue-400 mb-1 flex items-center justify-center gap-1.5">
-                <Key className="h-3 w-3" /> Master NetCap
+                <Key className="h-3 w-3" /> Minted Token
              </div>
-             <div className="text-[9px] text-slate-400 font-mono">Permissions: <span className="text-green-400">ALL</span></div>
+             <div className="text-[9px] text-slate-400 font-mono">Caveats: <span className="text-green-400">none</span></div>
           </div>
         </div>
 
@@ -92,29 +93,29 @@ export default function MacaroonCaveatViz() {
           
           <div className="bg-[#020a14] border border-slate-600 rounded-xl p-3 z-10 w-full max-w-[200px] shadow-xl">
              <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 text-center mb-3">
-                Apply Caveats
+                Cx::attenuate
              </div>
              <div className="space-y-2">
-                <CaveatToggle id="domain-restrict" label="Domain: api.com" active={activeCaveats.has("domain-restrict")} onClick={() => toggleCaveat("domain-restrict")} disabled={attemptState !== "idle"} />
-                <CaveatToggle id="read-only" label="Methods: GET only" active={activeCaveats.has("read-only")} onClick={() => toggleCaveat("read-only")} disabled={attemptState !== "idle"} />
-                <CaveatToggle id="time-limit" label="Expires in 50ms" active={activeCaveats.has("time-limit")} onClick={() => toggleCaveat("time-limit")} disabled={attemptState !== "idle"} />
+                <CaveatToggle id="resource-scope" label="ResourceScope(api/**)" active={activeCaveats.has("resource-scope")} onClick={() => toggleCaveat("resource-scope")} disabled={attemptState !== "idle"} />
+                <CaveatToggle id="time-before" label="TimeBefore(100ms)" active={activeCaveats.has("time-before")} onClick={() => toggleCaveat("time-before")} disabled={attemptState !== "idle"} />
+                <CaveatToggle id="region-scope" label="RegionScope(7)" active={activeCaveats.has("region-scope")} onClick={() => toggleCaveat("region-scope")} disabled={attemptState !== "idle"} />
              </div>
           </div>
         </div>
 
         {/* Child Task */}
         <div className="md:col-span-4 flex flex-col items-center justify-center p-4 border border-white/5 bg-slate-900/30 rounded-xl relative">
-          <div className="absolute top-2 left-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">Untrusted Worker</div>
-          
+          <div className="absolute top-2 left-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">Child Task</div>
+
           <div className="mt-4 bg-[#020a14] border border-blue-500/30 rounded-lg p-3 w-full mb-6">
              <div className="text-xs font-bold text-blue-400 mb-2 flex items-center justify-center gap-1.5">
                 <Key className="h-3 w-3" /> Attenuated Token
              </div>
              <div className="flex flex-wrap gap-1 justify-center min-h-[24px]">
-                {activeCaveats.size === 0 && <span className="text-[9px] text-slate-500 italic">No restrictions added</span>}
-                {activeCaveats.has("domain-restrict") && <span className="text-[9px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-1.5 rounded">DomainLock</span>}
-                {activeCaveats.has("read-only") && <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 rounded">ReadOnly</span>}
-                {activeCaveats.has("time-limit") && <span className="text-[9px] bg-rose-500/20 text-rose-300 border border-rose-500/30 px-1.5 rounded">Deadline</span>}
+                {activeCaveats.size === 0 && <span className="text-[9px] text-slate-500 italic">No caveats added</span>}
+                {activeCaveats.has("resource-scope") && <span className="text-[9px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-1.5 rounded">ResourceScope</span>}
+                {activeCaveats.has("time-before") && <span className="text-[9px] bg-rose-500/20 text-rose-300 border border-rose-500/30 px-1.5 rounded">TimeBefore</span>}
+                {activeCaveats.has("region-scope") && <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 rounded">RegionScope</span>}
              </div>
           </div>
 
@@ -124,14 +125,14 @@ export default function MacaroonCaveatViz() {
                 disabled={attemptState !== "idle"}
                 className="flex-1 bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-slate-300 py-2 rounded transition-colors disabled:opacity-50"
              >
-                GET api.com
+                api/orders · r7 · 20ms
              </button>
              <button 
                 onClick={() => simulateAttempt("malicious")}
                 disabled={attemptState !== "idle"}
                 className="flex-1 bg-red-950/40 hover:bg-red-900/60 border border-red-500/20 text-[10px] font-bold text-red-400 py-2 rounded transition-colors disabled:opacity-50"
              >
-                POST evil.com
+                admin/keys · r9 · 120ms
              </button>
              
              {/* Verification Overlay */}
@@ -148,7 +149,7 @@ export default function MacaroonCaveatViz() {
                       {attemptState === "blocked" && <ShieldAlert className="h-6 w-6 text-red-500 mb-1" />}
                       
                       <span className={`text-[10px] font-bold uppercase ${attemptState === "allowed" ? "text-green-400" : attemptState === "blocked" ? "text-red-400" : "text-blue-400"}`}>
-                         {attemptState === "checking" ? "Verifying Caveats..." : attemptState === "allowed" ? "Operation Permitted" : "Violation Blocked"}
+                         {attemptState === "checking" ? "Verifying Chain..." : attemptState === "allowed" ? "Verified" : "Caveat Failed"}
                       </span>
                    </motion.div>
                 )}
@@ -157,6 +158,10 @@ export default function MacaroonCaveatViz() {
         </div>
 
       </div>
+
+      <p className="mt-6 text-xs text-slate-500">
+        Eight caveat kinds: TimeBefore, TimeAfter, RegionScope, TaskScope, MaxUses, ResourceScope (glob), RateLimit, Custom. Each one extends an HMAC-SHA256 chain; checking spawns against a token is opt-in.
+      </p>
     </div>
   );
 }

@@ -7,18 +7,27 @@ import { Search, ShieldAlert, CheckCircle2, LineChart, Play } from "lucide-react
 
 type OracleState = "idle" | "monitoring" | "rejected";
 
+// Upstream defaults (src/lab/oracle/eprocess.rs).
+const P0 = 0.001;
+const LAMBDA = 0.5;
+const ALPHA = 0.05;
+
 export default function TestOraclesViz() {
   const prefersReduced = useReducedMotion();
   const [testState, setTestState] = useState<OracleState>("idle");
   const [eProcessValue, setEProcessValue] = useState(1.0); // Starts at 1.0
+  const [seeds, setSeeds] = useState(0);
   const timeRef = useRef(0);
+  const eRef = useRef(1.0);
 
-  const threshold = 20.0; // Rejection threshold (1/alpha for alpha=0.05)
+  const threshold = 1 / ALPHA; // 20
 
   const startTest = () => {
     setTestState("monitoring");
     setEProcessValue(1.0);
+    setSeeds(0);
     timeRef.current = 0;
+    eRef.current = 1.0;
   };
 
   useEffect(() => {
@@ -26,40 +35,34 @@ export default function TestOraclesViz() {
 
     const interval = setInterval(() => {
       timeRef.current += 1;
+      const t = timeRef.current;
 
-      setEProcessValue(prev => {
-        // Simulate a betting martingale (E-process).
-        // It wanders around 1.0 but suddenly spikes when evidence of a bug accumulates.
+      // One observation per seed: obligation_leak's own pass/fail verdict.
+      // In this illustration the leak shows up on every other seed after seed 10.
+      const violated = t > 10 && t % 2 === 0 ? 1 : 0;
 
-        let multiplier = 0.9 + Math.random() * 0.3; // Random walk
+      // E_t = E_{t-1} * (1 + λ (X_t - p₀))
+      const next = eRef.current * (1 + LAMBDA * (violated - P0));
+      eRef.current = next;
+      setSeeds(t);
+      setEProcessValue(next);
 
-        // Inject a bug signature after some time
-        if (timeRef.current > 15) {
-           multiplier = 1.4 + Math.random() * 0.5; // Exponential growth of evidence
-        }
-
-        const next = prev * multiplier;
-
-        if (next >= threshold) {
-           setTestState("rejected");
-           clearInterval(interval);
-           return threshold + 2; // Cap it for viz
-        }
-
-        return next;
-      });
+      if (next >= threshold) {
+        setTestState("rejected");
+        clearInterval(interval);
+      }
     }, 200);
 
     return () => clearInterval(interval);
-  }, [testState]);
+  }, [testState, threshold]);
 
   return (
     <div className="w-full rounded-2xl border border-white/10 p-6 md:p-8 bg-slate-950">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
         <div>
-          <h3 className="text-lg font-semibold text-white">E-Process Test Oracles</h3>
+          <h3 className="text-lg font-semibold text-white">Oracles Across Seeds</h3>
           <p className="text-sm text-slate-400 mt-1">
-            Anytime-valid statistical monitors continuously auditing runtime invariants.
+            Each seed&apos;s oracle verdicts feed an anytime-valid e-process.
           </p>
         </div>
         
@@ -69,30 +72,32 @@ export default function TestOraclesViz() {
           className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50"
         >
           {testState === "rejected" ? <RotateCcwIcon className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-          {testState === "rejected" ? "Restart Oracle" : "Start Audit"}
+          {testState === "rejected" ? "Restart" : "Run Seeds"}
         </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-         
-         {/* Oracle Matrix */}
+
+         {/* Standard e-process monitor: three oracles */}
          <div className="flex flex-col gap-3">
-            <OracleCard name="TaskLeakOracle" active={testState === "monitoring"} status={testState === "rejected" ? "passed" : "pending"} />
-            <OracleCard name="ObligationLeakOracle" active={testState === "monitoring"} status={testState === "rejected" ? "failed" : "pending"} />
-            <OracleCard name="QuiescenceOracle" active={testState === "monitoring"} status={testState === "rejected" ? "passed" : "pending"} />
-            <OracleCard name="CancelProtocolOracle" active={testState === "monitoring"} status={testState === "rejected" ? "passed" : "pending"} />
+            <OracleCard name="task_leak" active={testState === "monitoring"} status={testState === "rejected" ? "passed" : "pending"} />
+            <OracleCard name="obligation_leak" active={testState === "monitoring"} status={testState === "rejected" ? "failed" : "pending"} />
+            <OracleCard name="quiescence" active={testState === "monitoring"} status={testState === "rejected" ? "passed" : "pending"} />
+            <div className="text-[10px] font-mono text-slate-500">
+               Seeds run: {seeds} · p₀ = {P0}, λ = {LAMBDA}, α = {ALPHA}
+            </div>
          </div>
 
          {/* E-Process Chart */}
          <div className="relative border border-white/5 bg-black/40 rounded-xl p-4 flex flex-col justify-end min-h-[200px] overflow-hidden">
             <div className="absolute top-4 left-4 flex items-center gap-2 text-slate-400">
                <LineChart className="h-4 w-4" />
-               <span className="text-[10px] font-bold uppercase tracking-widest">E-Process Value</span>
+               <span className="text-[10px] font-bold uppercase tracking-widest">E-Value (obligation_leak)</span>
             </div>
 
             {/* Threshold Line */}
             <div className="absolute top-[20%] left-0 w-full border-t border-dashed border-red-500/50 flex items-center">
-               <span className="bg-[#020a14] text-red-400 text-[9px] font-mono px-1 ml-2">Rejection Threshold (20.0)</span>
+               <span className="bg-[#020a14] text-red-400 text-[9px] font-mono px-1 ml-2">Reject at 1/α = 20</span>
             </div>
 
             {/* Data Bar (Simulating a single current value instead of drawing a full line graph for simplicity) */}
@@ -117,9 +122,9 @@ export default function TestOraclesViz() {
                      className="absolute inset-0 bg-red-950/80 backdrop-blur-sm flex flex-col items-center justify-center z-10"
                   >
                      <ShieldAlert className="h-10 w-10 text-red-500 mb-2" />
-                     <h4 className="text-sm font-black text-white uppercase tracking-widest">Null Hypothesis Rejected</h4>
+                     <h4 className="text-sm font-black text-white uppercase tracking-widest">H₀ Rejected</h4>
                      <p className="text-[10px] text-red-200 mt-1 max-w-[200px] text-center">
-                        E-Process crossed threshold. Statistically significant evidence of an Obligation Leak detected mid-run.
+                        Enough obligation_leak failures across seeds to reject H₀ (violation rate ≤ p₀) at α = 0.05.
                      </p>
                   </motion.div>
                )}
@@ -127,6 +132,10 @@ export default function TestOraclesViz() {
          </div>
 
       </div>
+
+      <p className="mt-4 text-xs text-slate-500">
+        The oracle flags each failing run itself. The e-process summarizes those verdicts across seeds; it does not find new bugs.
+      </p>
     </div>
   );
 }

@@ -3,66 +3,70 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useReducedMotion } from "@/components/motion";
-import { Activity, AlertOctagon, CheckCircle2, RefreshCw } from "lucide-react";
+import { Activity, AlertOctagon, RefreshCw } from "lucide-react";
 
-type DeadlockState = "healthy" | "forming" | "critical" | "intervened";
+// Severity levels reported by the spectral health diagnostic.
+type Severity = "none" | "watch" | "warning" | "critical";
+
+const SEVERITY_TARGET: Record<Severity, number> = { none: 1.0, watch: 0.6, warning: 0.3, critical: 0.06 };
+const SEVERITY_COLOR: Record<Severity, string> = { none: "#3b82f6", watch: "#eab308", warning: "#f97316", critical: "#ef4444" };
 
 export default function SpectralDeadlockViz() {
   const prefersReduced = useReducedMotion();
-  const [stage, setStage] = useState<DeadlockState>("healthy");
+  const [stage, setStage] = useState<Severity>("none");
+  const [finished, setFinished] = useState(false);
   const [fiedlerValue, setFiedlerValue] = useState(1.0);
   const elapsedRef = useRef(0);
 
   const startSimulation = () => {
-    setStage("healthy");
+    setStage("none");
+    setFinished(false);
     setFiedlerValue(1.0);
     elapsedRef.current = 0;
   };
 
   useEffect(() => {
-    if (stage === "intervened") return;
+    if (finished) return;
 
     const interval = setInterval(() => {
       elapsedRef.current += 1;
       const e = elapsedRef.current;
 
-      if (e > 40 && stage === "critical") {
-         setStage("intervened");
+      if (e > 45 && stage === "critical") {
+         setFinished(true);
          clearInterval(interval);
          return;
       }
 
-      if (e > 20 && stage === "forming") {
+      if (e > 28 && stage === "warning") {
          setStage("critical");
-      } else if (e > 5 && stage === "healthy") {
-         setStage("forming");
+      } else if (e > 15 && stage === "watch") {
+         setStage("warning");
+      } else if (e > 5 && stage === "none") {
+         setStage("watch");
       }
 
-      setFiedlerValue(prev => {
-         let target = 1.0;
-         if (stage === "forming") target = 0.4;
-         if (stage === "critical") target = 0.05;
-         return prev + (target - prev) * 0.1;
-      });
+      setFiedlerValue(prev => prev + (SEVERITY_TARGET[stage] - prev) * 0.1);
 
     }, 100);
 
     return () => clearInterval(interval);
-  }, [stage]);
+  }, [stage, finished]);
 
-  // Determine graph colors based on state
-  const isForming = stage === "forming" || stage === "critical";
-  const isCritical = stage === "critical";
-  const nodeColor = stage === "intervened" ? "#22c55e" : isCritical ? "#ef4444" : isForming ? "#eab308" : "#3b82f6";
-  const edgeColor = stage === "intervened" ? "#22c55e66" : isCritical ? "#ef444499" : isForming ? "#eab30899" : "#3b82f666";
+  // The graph thins out as severity rises: D→A weakens then disappears,
+  // then B→C becomes the only link between {A, B} and {C, D}.
+  const nodeColor = SEVERITY_COLOR[stage];
+  const edgeColor = `${SEVERITY_COLOR[stage]}99`;
+  const closingEdgeGone = stage === "warning" || stage === "critical";
+  const bottleneck = stage === "critical";
 
   return (
     <div className="w-full rounded-2xl border border-white/10 p-6 md:p-8 bg-slate-950">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
         <div>
-          <h3 className="text-lg font-semibold text-white">Spectral Deadlock Detection</h3>
+          <h3 className="text-lg font-semibold text-white">Spectral Wait-Graph Health</h3>
           <p className="text-sm text-slate-400 mt-1">
-            Real-time wait-graph eigenvalue analysis.
+            On-demand, advisory diagnostic over the task wait graph.
           </p>
         </div>
         
@@ -93,17 +97,25 @@ export default function SpectralDeadlockViz() {
 
               {/* Edges */}
               <motion.line x1="100" y1="40" x2="160" y2="100" stroke={edgeColor} strokeWidth="2" markerEnd="url(#arrow)" animate={{ stroke: edgeColor }} />
-              <motion.line x1="160" y1="100" x2="100" y2="160" stroke={edgeColor} strokeWidth="2" markerEnd="url(#arrow)" animate={{ stroke: edgeColor }} />
+              {/* B→C: becomes the bottleneck link at critical */}
+              <motion.line
+                x1="160" y1="100" x2="100" y2="160"
+                stroke={edgeColor}
+                strokeWidth={bottleneck ? 1 : 2}
+                strokeDasharray={bottleneck ? "2 4" : "0"}
+                markerEnd="url(#arrow)"
+                animate={{ stroke: edgeColor }}
+              />
               <motion.line x1="100" y1="160" x2="40" y2="100" stroke={edgeColor} strokeWidth="2" markerEnd="url(#arrow)" animate={{ stroke: edgeColor }} />
-              
-              {/* Critical cycle edge that completes the deadlock */}
-              <motion.line 
-                x1="40" y1="100" x2="100" y2="40" 
-                stroke={stage === "healthy" ? "#334155" : stage === "intervened" ? "#334155" : edgeColor} 
-                strokeWidth="2" 
-                strokeDasharray={stage === "forming" ? "4 4" : "0"}
-                markerEnd={stage === "healthy" || stage === "intervened" ? "url(#arrow-broken)" : "url(#arrow)"} 
-                animate={{ stroke: stage === "healthy" || stage === "intervened" ? "#334155" : edgeColor }} 
+
+              {/* D→A: weakens at watch, gone from warning on */}
+              <motion.line
+                x1="40" y1="100" x2="100" y2="40"
+                stroke={closingEdgeGone ? "#334155" : edgeColor}
+                strokeWidth="2"
+                strokeDasharray={stage === "watch" ? "4 4" : closingEdgeGone ? "1 6" : "0"}
+                markerEnd={closingEdgeGone ? "url(#arrow-broken)" : "url(#arrow)"}
+                animate={{ stroke: closingEdgeGone ? "#334155" : edgeColor }}
               />
 
               {/* Nodes */}
@@ -118,17 +130,6 @@ export default function SpectralDeadlockViz() {
 
               <motion.circle cx="40" cy="100" r="15" fill="#0A1628" stroke={nodeColor} strokeWidth="3" animate={{ stroke: nodeColor }} />
               <text x="40" y="104" textAnchor="middle" fill="#fff" fontSize="10" fontFamily="monospace">D</text>
-
-              {/* Intervention indicator */}
-              <AnimatePresence>
-                 {stage === "intervened" && (
-                    <motion.g initial={{ opacity: 0, scale: 0.5 }} animate={{ opacity: 1, scale: 1 }}>
-                       <circle cx="70" cy="70" r="10" fill="#ef4444" />
-                       <line x1="65" y1="65" x2="75" y2="75" stroke="#fff" strokeWidth="2" />
-                       <line x1="75" y1="65" x2="65" y2="75" stroke="#fff" strokeWidth="2" />
-                    </motion.g>
-                 )}
-              </AnimatePresence>
            </svg>
         </div>
 
@@ -156,25 +157,22 @@ export default function SpectralDeadlockViz() {
               </div>
 
               <div className="text-center mt-3 text-xs font-bold text-slate-400 uppercase tracking-widest">
-                 Fiedler Value (\u03BB₂)
+                 Fiedler Value (λ₂)
               </div>
            </div>
         </div>
 
-        {/* Status Overlay */}
+        {/* Report note */}
         <AnimatePresence>
-          {stage === "intervened" && (
+          {finished && (
             <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="absolute inset-0 bg-black/70 backdrop-blur-md flex flex-col items-center justify-center z-10 p-6 text-center"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: prefersReduced ? 0 : 0.2 }}
+              className="absolute bottom-3 left-3 right-3 z-10 rounded-lg border border-red-500/40 bg-black/80 backdrop-blur-sm p-3 text-left"
             >
-              <div className="h-16 w-16 rounded-full bg-blue-500/20 border border-blue-500 flex items-center justify-center mb-4">
-                <CheckCircle2 className="h-8 w-8 text-blue-500" />
-              </div>
-              <h4 className="text-xl font-black text-white">Preemptive Intervention</h4>
-              <p className="text-sm text-slate-300 mt-2 max-w-sm">
-                Fiedler value dropped below the critical threshold (0.1). The scheduler injected a cancellation to break the wait-cycle before a total system deadlock occurred.
+              <p className="text-xs text-slate-300">
+                <span className="font-bold text-red-400">Report: critical.</span> The graph is close to splitting at B→C. The diagnostic reports this; it does not cancel or restart anything.
               </p>
             </motion.div>
           )}
@@ -185,21 +183,25 @@ export default function SpectralDeadlockViz() {
       {/* Metrics */}
       <div className="mt-6 pt-6 border-t border-white/10 grid grid-cols-2 gap-4 text-center">
         <div>
-          <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 mb-1">System State</div>
-          <div className="flex justify-center items-center gap-1.5">
-             {stage === "healthy" && <><Activity className="h-3 w-3 text-blue-400" /><span className="text-sm font-black text-blue-400 uppercase tracking-wide">Flowing</span></>}
-             {stage === "forming" && <><AlertOctagon className="h-3 w-3 text-yellow-400" /><span className="text-sm font-black text-yellow-400 uppercase tracking-wide">Congestion</span></>}
-             {stage === "critical" && <><AlertOctagon className="h-3 w-3 text-red-400" /><span className="text-sm font-black text-red-400 uppercase tracking-wide">Cycle Imminent</span></>}
-             {stage === "intervened" && <><CheckCircle2 className="h-3 w-3 text-green-400" /><span className="text-sm font-black text-green-400 uppercase tracking-wide">Resolved</span></>}
+          <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 mb-1">Severity</div>
+          <div className="flex justify-center items-center gap-1.5" aria-live="polite">
+             {stage === "none" && <><Activity className="h-3 w-3 text-blue-400" /><span className="text-sm font-black text-blue-400 uppercase tracking-wide">None</span></>}
+             {stage === "watch" && <><AlertOctagon className="h-3 w-3 text-yellow-400" /><span className="text-sm font-black text-yellow-400 uppercase tracking-wide">Watch</span></>}
+             {stage === "warning" && <><AlertOctagon className="h-3 w-3 text-orange-400" /><span className="text-sm font-black text-orange-400 uppercase tracking-wide">Warning</span></>}
+             {stage === "critical" && <><AlertOctagon className="h-3 w-3 text-red-400" /><span className="text-sm font-black text-red-400 uppercase tracking-wide">Critical</span></>}
           </div>
         </div>
         <div>
-          <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 mb-1">Graph Connectivity</div>
-          <div className={`text-xl font-black font-mono transition-colors ${stage === "critical" ? "text-red-400" : "text-white"}`}>
-            {(fiedlerValue * 100).toFixed(0)}%
+          <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 mb-1">Mode</div>
+          <div className="text-sm font-black uppercase tracking-wide text-white">
+            On demand, advisory
           </div>
         </div>
       </div>
+
+      <p className="mt-4 text-xs text-slate-500">
+        A falling Fiedler value means the wait graph is close to splitting: a topology signal, not proof of a deadlock. The scheduler runs its own copy only when the opt-in governor is on.
+      </p>
     </div>
   );
 }

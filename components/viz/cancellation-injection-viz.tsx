@@ -14,8 +14,9 @@ export default function CancellationInjectionViz() {
   const totalAwaits = 4;
   const buggyAwait = 3; // The 3rd await point causes a leak if cancelled
 
+  // Run 0 is the recording run (no cancellation); run k cancels at await point k.
   const startSimulation = () => {
-    setCurrentRun(1);
+    setCurrentRun(0);
     setRunState("running");
     setActiveAwait(1);
   };
@@ -25,15 +26,16 @@ export default function CancellationInjectionViz() {
     let isActive = true;
 
     const runSimulation = async () => {
-       // Step through awaits up to the injection point
-       for (let i = 1; i <= currentRun; i++) {
+       // Step through awaits: all of them on the recording run, otherwise up to the injection point
+       const lastAwait = currentRun === 0 ? totalAwaits : currentRun;
+       for (let i = 1; i <= lastAwait; i++) {
           if (!isActive) return;
           setActiveAwait(i);
           await new Promise(r => setTimeout(r, 600));
        }
 
        if (!isActive) return;
-       // Boom! Cancel injected
+       // Cancel injected (or, on the recording run, the body finishes); oracles check the run
        await new Promise(r => setTimeout(r, 400));
        
        if (!isActive) return;
@@ -64,9 +66,9 @@ export default function CancellationInjectionViz() {
     <div className="w-full rounded-2xl border border-white/10 p-6 md:p-8 bg-slate-950">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
         <div>
-          <h3 className="text-lg font-semibold text-white">Cancellation Injection Matrix</h3>
+          <h3 className="text-lg font-semibold text-white">Cancellation Injection</h3>
           <p className="text-sm text-slate-400 mt-1">
-            Systematically dropping cancel bombs at every `.await` point.
+            One recording run, then one re-run per await point with a cancel injected there. Oracles check each run.
           </p>
         </div>
         
@@ -92,9 +94,9 @@ export default function CancellationInjectionViz() {
                      <div className="w-6 text-right text-slate-600 text-xs">{awaitNum}</div>
                      <div className="flex-1">
                         {awaitNum === 1 && <span>db.verify_balance().<span className="text-pink-400">await</span>;</span>}
-                        {awaitNum === 2 && <span>let lock = db.acquire_lock().<span className="text-pink-400">await</span>;</span>}
+                        {awaitNum === 2 && <span>let lease = db.acquire_lease().<span className="text-pink-400">await</span>;</span>}
                         {awaitNum === 3 && <span>api.send_ledger_update().<span className="text-pink-400">await</span>;</span>}
-                        {awaitNum === 4 && <span>lock.release().<span className="text-pink-400">await</span>;</span>}
+                        {awaitNum === 4 && <span>lease.release().<span className="text-pink-400">await</span>;</span>}
                      </div>
                      
                      {/* Status / Bomb indicator */}
@@ -143,7 +145,7 @@ export default function CancellationInjectionViz() {
                  <div>
                     <h4 className="text-sm font-black text-red-400 uppercase tracking-widest">Oracle Violation Caught</h4>
                     <p className="text-xs text-red-200 mt-1">
-                       <strong>ObligationLeak:</strong> Cancellation injected at `await` point 3 caused the function to exit without releasing `lock`.
+                       <strong>obligation_leak:</strong> cancelling at await point 3 ended the task with <code>lease</code> (a Lease obligation) still unresolved.
                     </p>
                  </div>
               </div>
@@ -160,11 +162,18 @@ export default function CancellationInjectionViz() {
           <div className="text-sm font-medium text-slate-300">
              InjectionStrategy::AllPoints
           </div>
+          <div className="text-[10px] font-mono text-slate-500 mt-1">
+             {runState === "idle" && currentRun === 0
+               ? "not started"
+               : currentRun === 0
+                 ? "recording run (no cancel)"
+                 : `re-run ${currentRun} of ${totalAwaits}: cancel at await ${currentRun}`}
+          </div>
         </div>
         <div className="text-right">
-          <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1">Pass / Fail</div>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1">Injection Runs Pass / Fail</div>
           <div className="flex items-center gap-2 justify-end font-mono">
-            <span className="text-green-400">{Math.min(currentRun - (runState === "failed" ? 1 : 0), totalAwaits)}</span>
+            <span className="text-green-400">{runState === "passed" || (runState === "idle" && currentRun === totalAwaits) ? currentRun : Math.max(0, currentRun - 1)}</span>
             <span className="text-slate-600">/</span>
             <span className="text-red-400">{runState === "failed" ? 1 : 0}</span>
           </div>

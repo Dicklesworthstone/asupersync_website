@@ -170,7 +170,7 @@ export default function EProcessMonitorViz() {
 
           {/* X-axis label */}
           <text x={chartW / 2} y={chartH - 2} fill="#64748B" fontSize={8} textAnchor="middle">
-            observations (t)
+            runs (t), one oracle verdict each
           </text>
 
           {/* E-process line */}
@@ -222,10 +222,10 @@ export default function EProcessMonitorViz() {
         >
           {rejected ? (
             <div>
-              <span className="text-sm font-bold text-red-400">Invariant Violated</span>
-              <span className="mx-2 text-slate-600">—</span>
+              <span className="text-sm font-bold text-red-400">H₀ Rejected</span>
+              <span className="mx-2 text-slate-600">·</span>
               <span className="text-sm text-slate-400">
-                E-value crossed 1/α = {THRESHOLD}. Rejection is valid at any stopping time.
+                E crossed 1/α = {THRESHOLD}: violation rate above p₀. Valid at any stopping time.
               </span>
             </div>
           ) : (
@@ -233,9 +233,9 @@ export default function EProcessMonitorViz() {
               <span className="text-sm font-bold text-purple-400">
                 E = {points.length > 0 ? points[points.length - 1].value.toFixed(3) : "1.000"}
               </span>
-              <span className="mx-2 text-slate-600">—</span>
+              <span className="mx-2 text-slate-600">·</span>
               <span className="text-sm text-slate-400">
-                {isRunning ? "Monitoring..." : "Idle"} (λ={LAMBDA}, p₀={P0})
+                {isRunning ? "Monitoring..." : "Idle"} (λ={LAMBDA}, p₀={P0}, α=0.05)
               </span>
             </div>
           )}
@@ -270,7 +270,7 @@ export default function EProcessMonitorViz() {
       </div>
 
       <p className="mt-3 text-center text-[10px] text-slate-600">
-        Toggle &quot;Inject Violations&quot; to simulate oracle invariant failures. Watch the E-value climb toward the rejection threshold.
+        Each observation is one run&apos;s pass/fail verdict from an oracle, so the e-process summarizes failures the oracles already flagged. Toggle &quot;Inject Violations&quot; to raise the simulated failure rate.
       </p>
     </div>
   );
