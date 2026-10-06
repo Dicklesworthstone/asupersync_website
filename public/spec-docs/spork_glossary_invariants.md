@@ -22,7 +22,7 @@ Mapped to: `Actor` trait, `ActorHandle<A>`, `ActorRef<M>` in `src/actor.rs`.
 **GenServer (Generic Server)**
 A specialized actor pattern providing synchronous call (request-response) and asynchronous cast (fire-and-forget) message handling. GenServer wraps the `Actor` trait with a typed message protocol that distinguishes calls (which create a reply obligation) from casts (which do not).
 
-Status: Planned (bd-2fh3z). Will build on existing `Actor` + `oneshot` channel for reply.
+Status: Implemented. Mapped to `GenServer`, `GenServerHandle`, `Reply`, and `SystemMsg` in `src/gen_server.rs`.
 
 **Supervisor**
 A Spork process responsible for starting, monitoring, and restarting child processes according to a configured strategy. Supervisors form the backbone of fault tolerance. They are themselves region-owned and participate in the region's quiescence protocol.
@@ -44,12 +44,12 @@ Mapped to: `mpsc::channel<M>` in `src/channel/mpsc.rs`, configured via `MailboxC
 **Call**
 A synchronous request-response interaction with a GenServer. The caller sends a message and receives a reply. Calls create a *reply obligation*: the server must either reply or the obligation is detected as leaked. Calls are inherently bounded by the caller's budget (deadline, poll quota).
 
-Status: Planned. Will use `oneshot::channel` for reply delivery + `ObligationToken` for linearity.
+Status: Implemented. Uses tracked oneshot reply permits and obligation-aware send/abort paths in `src/gen_server.rs`.
 
 **Cast**
 An asynchronous fire-and-forget message to a GenServer. The sender does not wait for a reply. Casts flow through the mailbox with standard backpressure (bounded channel blocks when full). No reply obligation is created.
 
-Status: Planned. Maps directly to existing `ActorRef::send()`.
+Status: Implemented. Maps to `GenServerHandle::cast` / `try_cast` with bounded-mailbox backpressure in `src/gen_server.rs`.
 
 **Reply Obligation**
 A linear token created when a call message is received by a GenServer. The server *must* consume this token by sending a reply. If the token is dropped without reply (e.g., due to a bug or panic), the obligation system detects the leak. In lab mode, leaked reply obligations trigger a diagnostic; in production, the caller's oneshot receives an error.
@@ -66,7 +66,7 @@ Mapped to: Region parent-child relationship + `SupervisionDecision` in `src/supe
 **Monitoring**
 A unidirectional observation of another process's lifecycle. Monitors receive a notification when the monitored process terminates but are not themselves affected by the termination. This is a lighter-weight alternative to linking.
 
-Status: Planned. Will use a watch-style channel or callback registration on `ActorHandle::is_finished()`.
+Status: Implemented. Mapped to `MonitorRef`, `DownNotification`, and deterministic `SystemMsg::Down` delivery.
 
 **Supervision Strategy**
 The policy a supervisor follows when a child fails:
@@ -347,9 +347,9 @@ Erlang's ability to upgrade running code (hot code swap) is not supported. Actor
 
 Spork does not pretend that remote actors behave identically to local ones. Remote communication uses the explicit `remote::invoke` API with leases and idempotency keys (Asupersync tier 4). Message passing to remote actors is not transparently proxied through local mailboxes.
 
-### NG-4: Process Groups / pg Module
+### NG-4: Distributed Process Groups / Cluster pg Module
 
-Erlang's `pg` (process groups) for pub/sub style communication is not in v1. Spork actors communicate through explicit `ActorRef` handles obtained via the registry or direct spawning. Group-based broadcast can be built on top using a supervisor that manages a set of actors.
+Spork now includes a node-local `spork::process_group` value layer for validated group names, deterministic member snapshots, membership-event cursors, and broadcast accounting. Cluster-wide `pg` behavior and runtime delivery across nodes remain out of scope for v1.
 
 ### NG-5: Dynamic Supervision (add_child at runtime)
 
@@ -431,6 +431,7 @@ Submodules and responsibilities:
 | `spork::genserver` | `GenServer` trait, `call/cast`, reply-obligation linearity, budget-driven timeouts | `actor`, `channel`, `obligation`, `types::{Budget, Outcome}` |
 | `spork::supervisor` | `Supervisor` builder + `ChildSpec`, compiled topology over regions, deterministic restart semantics | `supervision`, `cx::{Scope, Cx}`, `runtime::RuntimeState` |
 | `spork::registry` | capability-scoped naming, name ownership as lease obligations, deterministic collision semantics | `obligation`, `types::{Time, Budget}`, planned in bd-3rpp8 |
+| `spork::process_group` | node-local group names, deterministic member snapshots, event cursors, and broadcast accounting | `remote::NodeId`, `types::{TaskId, Time}`, `monitor::DownReason` |
 | `spork::link` | linking/monitoring, down events, deterministic ordering contracts | `supervision` + planned monitor/Down delivery |
 | `spork::crash` | deterministic crash packs, canonical traces, replay hooks | `trace`, `lab`, `record` (internal) |
 | `spork::lab` | app harness + conformance suites (seed-sweep, DPOR, oracles) | `lab::{LabRuntime, LabConfig}`, `trace` |
@@ -526,15 +527,14 @@ jq '{scenario_id,seed,schema_version,config_hash,trace_fingerprint,trace_file,in
 
 # (2) Re-run exactly with same seed + artifact dir
 SEED=$(jq -r '.seed' "$ART/$SAFE_TEST_ID/repro_manifest.json")
-ASUPERSYNC_SEED="$SEED" ASUPERSYNC_TEST_ARTIFACTS_DIR="$ART" \
-  cargo test "$TEST_ID" -- --nocapture
+rch exec -- env ASUPERSYNC_SEED="$SEED" ASUPERSYNC_TEST_ARTIFACTS_DIR="$ART" CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_spork_glossary_docs cargo test "$TEST_ID" -- --nocapture
 
 # (3) Verify trace + inspect divergence
 TRACE_FILE=$(jq -r '.trace_file // "trace.async"' "$ART/$SAFE_TEST_ID/repro_manifest.json")
-cargo run --features cli --bin asupersync -- trace info "$ART/$SAFE_TEST_ID/$TRACE_FILE"
-cargo run --features cli --bin asupersync -- trace verify --strict "$ART/$SAFE_TEST_ID/$TRACE_FILE"
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_spork_glossary_docs cargo run --features cli --bin asupersync -- trace info "$ART/$SAFE_TEST_ID/$TRACE_FILE"
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_spork_glossary_docs cargo run --features cli --bin asupersync -- trace verify --strict "$ART/$SAFE_TEST_ID/$TRACE_FILE"
 # optional compare against baseline
-cargo run --features cli --bin asupersync -- trace diff <trace_a> <trace_b>
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_spork_glossary_docs cargo run --features cli --bin asupersync -- trace diff <trace_a> <trace_b>
 
 # (4) If crashpack exists, inspect + replay metadata
 CRASHPACK=$(jq -r '.failure_artifacts[]? | select(test("crashpack-.*\\.json$"))' \
@@ -547,8 +547,8 @@ if [ -n "$CRASHPACK" ]; then
 fi
 
 # (5) DPOR exploration + minimal counterexample diagnostics
-cargo test --test dpor_exploration explorer_discovers_classes_for_concurrent_tasks -- --nocapture
-cargo test --test replay_divergence_diagnostics e2e_divergence_diagnostics_structured_report -- --nocapture
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_spork_glossary_docs cargo test --test dpor_exploration explorer_discovers_classes_for_concurrent_tasks -- --nocapture
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_spork_glossary_docs cargo test --test replay_divergence_diagnostics e2e_divergence_diagnostics_structured_report -- --nocapture
 ```
 
 ### 7.3 Four-Step Triage Protocol
@@ -572,7 +572,7 @@ use `dpor_exploration` to enumerate schedule classes and
 Use the crashpack walkthrough suite in `src/trace/crashpack.rs`:
 
 ```bash
-cargo test --lib crashpack::tests::walkthrough -- --nocapture
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_spork_glossary_docs cargo test --lib crashpack::tests::walkthrough -- --nocapture
 ```
 
 What this demonstrates (deterministic and currently passing in-tree):
@@ -596,7 +596,7 @@ fingerprint=<manifest.trace_fingerprint or crashpack.manifest.fingerprint>
 invariant=<INV-* or contract id>
 first_divergence_step=<n or none>
 crashpack=<path or none>
-dpor_command=cargo test --test dpor_exploration explorer_discovers_classes_for_concurrent_tasks -- --nocapture
+dpor_command=rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_spork_glossary_docs cargo test --test dpor_exploration explorer_discovers_classes_for_concurrent_tasks -- --nocapture
 artifacts=
   - target/test-artifacts/<safe_test_id>/repro_manifest.json
   - target/test-artifacts/<safe_test_id>/event_log.txt
@@ -636,8 +636,7 @@ br update <bd-id> --status in_progress --assignee <agent-name>
 # thread_id: <bd-id>
 
 # 3) Reproduce deterministically (see Section 7.2)
-ASUPERSYNC_SEED=<seed> ASUPERSYNC_TEST_ARTIFACTS_DIR=target/test-artifacts \
-  cargo test <test_id> -- --nocapture
+rch exec -- env ASUPERSYNC_SEED=<seed> ASUPERSYNC_TEST_ARTIFACTS_DIR=target/test-artifacts CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_spork_glossary_docs cargo test <test_id> -- --nocapture
 ```
 
 Minimum start message fields:

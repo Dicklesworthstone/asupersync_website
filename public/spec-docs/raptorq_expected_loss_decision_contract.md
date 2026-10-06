@@ -76,10 +76,20 @@ Each decision record must emit:
 
 Fallback is mandatory if any hard-trigger condition is true:
 
-1. decode mismatch detected
-2. proof replay mismatch
-3. unknown state with low confidence
-4. unclassified conservative fallback reason
+1. `decode_mismatch_detected` (decode mismatch detected)
+2. `proof_replay_mismatch` (proof replay mismatch)
+3. `policy_budget_exhausted` (runtime policy budget exhausted before a safe higher-confidence decision)
+4. `unknown_state_with_low_confidence`
+5. `regression_state_with_low_confidence`
+6. `conservative_fallback_reason_unclassified`
+
+The live runtime reason set emitted by `src/raptorq/decision_contract.rs`
+currently covers `policy_budget_exhausted`,
+`unknown_state_with_low_confidence`,
+`regression_state_with_low_confidence`, and
+`conservative_fallback_reason_unclassified`. The decode/proof mismatch triggers
+remain part of the broader contract because downstream validation and replay
+surfaces can force the same deterministic fallback action.
 
 ## Logging and Reproducibility
 
@@ -90,6 +100,28 @@ The contract artifact also defines a deterministic decision replay bundle linked
 to:
 
 - `artifacts/raptorq_replay_catalog_v1.json`
+
+Track-E evidence consumed by the expected-loss gate stays anchored to:
+
+- `artifacts/raptorq_track_e_gf256_p95p99_highconf_v1.json`
+  (`highconf_v1`, `narrowed closure-status guardrail`)
+- `artifacts/raptorq_track_e_gf256_multiscenario_refresh_v2.json`
+  (`short_window_directional_not_closure_grade`,
+  `historical short-window directional packet`)
+- `artifacts/raptorq_track_e_gf256_multiscenario_refresh_v3.json`
+  (`longer_window_interval_proxy_negative_guardrail`,
+  `historical broader interval-proxy negative guardrail`)
+- `artifacts/raptorq_track_e_gf256_multiscenario_refresh_v4.json`
+  (`raw_sample_mixed_signal_not_closure_grade`,
+  `historical broader mixed-signal packet`)
+- `artifacts/raptorq_track_e_gf256_multiscenario_refresh_v5.json`
+  (`raw_sample_favorable_not_closure_grade`,
+  `current broader raw-sample successor packet`)
+
+`highconf_v1` remains the narrowed closure-status guardrail, `v2` and `v3`
+remain historical broader packets, `v4` remains the historical mixed-signal
+packet, and `v5` is the current broader raw-sample successor packet consumed
+by G7 and the Track-G handoff.
 
 The replay bundle must include fixed-input decision samples for:
 
@@ -104,39 +136,72 @@ Each sample carries a full decision-output payload (`state_posterior`,
 
 Cargo-heavy validation and replay commands must use `rch`:
 
-- `rch exec -- cargo ...`
+- `rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_raptorq_g7_expected_loss_docs cargo test --test raptorq_perf_invariants g7_expected_loss_contract_schema_and_coverage -- --nocapture`
+- `rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_raptorq_g7_expected_loss_docs cargo test --test raptorq_perf_invariants g7_expected_loss_contract_replay_bundle_is_well_formed -- --nocapture`
+- `rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_raptorq_g7_expected_loss_docs cargo test --test raptorq_perf_invariants g7_expected_loss_contract_docs_are_cross_linked -- --nocapture`
 
-Primary replay anchor:
-
-- `rch exec -- cargo test --test raptorq_perf_invariants g7_expected_loss_contract_schema_and_coverage -- --nocapture`
+Because those G7 checks compare `closure_readiness` status fields against live
+Beads state, the artifact also defines a machine-checkable
+`reproducibility.status_snapshot_contract`. On shared rch workers, export
+`ASUPERSYNC_BEADS_STATUS_OVERRIDES_JSON` from the caller workspace snapshot of
+`.beads/issues.jsonl` for `asupersync-2cyx5`, `asupersync-36m6p`,
+`asupersync-3ltrv`, `asupersync-n5fk6`, and `asupersync-2zu9p`; shared workers
+can otherwise observe stale Beads JSONL during multi-agent sync races.
 
 ## Closure Readiness Contract
 
 The artifact includes a machine-checkable `closure_readiness` section to avoid
-hand-off ambiguity while dependencies are still active.
+hand-off ambiguity as dependency state changes.
 
 Current dependency set in the artifact:
 
 1. `asupersync-3ltrv` (G3 decision records) must be `closed`
-2. `asupersync-36m6p` (E5 high-confidence p95/p99 corpus) must be `closed`
+2. `asupersync-36m6p` (E5 Track-E evidence lineage:
+   `highconf_v1 + v2/v3/v4 history + v5 successor`) must be `closed`
 3. `asupersync-n5fk6` (F7 final closure evidence in G3 cards) must be `closed`
 4. `asupersync-2zu9p` (F8 implementation + closure evidence) must be `closed`
 
-Current closure-readiness status (2026-02-22 refresh):
+Dependency shorthand: `highconf_v1 + v2/v3/v4 history + v5 successor`.
+
+Current closure-readiness status (2026-05-08 refresh):
 
 - `asupersync-3ltrv`: `closed`
 - `asupersync-n5fk6`: `closed`
 - `asupersync-2zu9p`: `closed`
-- `asupersync-36m6p`: still `in_progress`
+- `asupersync-36m6p`: `closed`
 
-`ready_to_close` remains `false` because `asupersync-36m6p` has not yet reached
-`closed`, and Track-G handoff packet fields are still required for
-`asupersync-2cyx5`.
+`ready_to_close` is now `true` because all closure-readiness dependencies have
+reached `closed`.
+
+The current broader successor packet in that dependency lineage is
+`artifacts/raptorq_track_e_gf256_multiscenario_refresh_v5.json`; `v4` remains
+the historical mixed-signal packet, `highconf_v1` stays the narrowed guardrail,
+and `v2`/`v3` stay historical.
+
+Track-G handoff packet fields (`gate_verdict_table`, `artifact_replay_index`,
+`residual_risk_register`, `go_no_go_decision`) are now attached in
+`artifacts/raptorq_program_closure_signoff_packet_v1.json` and recorded under
+`closure_readiness.track_g_handoff.attached_packet_fields`. Track-G itself is
+now `closed`, and that live state is
+recorded under `closure_readiness.track_g_handoff.current_status` so the G7
+contract does not rely on bead id alone.
+
+The handoff remains machine-checkable through four explicit fields on
+`closure_readiness.track_g_handoff`:
+
+1. `required_packet_fields`
+2. `attached_packet_fields`
+3. `attachment_status`
+4. `evidence_ref`
+
+`required_packet_fields` and `attached_packet_fields` must match exactly for
+the ready-for-signoff handoff, `attachment_status` must remain
+`complete_in_h2_packet_ready_for_signoff`, and `evidence_ref` must stay
+anchored to `artifacts/raptorq_program_closure_signoff_packet_v1.json`.
 
 ## Closure Notes
 
-`asupersync-m7o6i` can close after:
+`asupersync-m7o6i` closure prerequisites are satisfied after:
 
-1. `asupersync-36m6p` reaches `closed` (dependency status requirement),
-2. Track-G summary packet for `asupersync-2cyx5` includes required fields (`gate_verdict_table`, `artifact_replay_index`, `residual_risk_register`, `go_no_go_decision`),
-3. Track-G summary packet references this contract artifact as the canonical G7 source.
+1. `asupersync-36m6p` reached `closed` (dependency status requirement),
+2. Track-G summary packet for `asupersync-2cyx5` remains synchronized with this contract artifact as the canonical G7 source.

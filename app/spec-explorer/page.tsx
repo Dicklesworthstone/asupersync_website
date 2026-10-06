@@ -4,10 +4,10 @@ import SpecViewerLoader from "@/components/spec-explorer/spec-viewer-loader";
 export const metadata: Metadata = {
   title: "Spec Docs — Asupersync",
   description:
-    "Browse the complete specification library for the Asupersync cancel-correct async runtime. Formal semantics, testing strategies, security models, and protocol specs.",
+    "The design documents behind Asupersync: the on-ramp, the formal semantics, the Spork and RaptorQ specs, threat models, and the testing methodology, mirrored from the main repository.",
   openGraph: {
     title: "Spec Docs — Asupersync",
-    description: "Browse the complete Asupersync specification library.",
+    description: "The design documents behind Asupersync, mirrored from the main repository.",
   },
 };
 
@@ -23,8 +23,8 @@ export default function SpecExplorerPage() {
           Spec Explorer
         </h1>
         <p className="text-lg text-slate-400 font-medium max-w-2xl">
-          Browse the complete specification library — formal semantics, testing
-          strategies, security models, and protocol documentation.
+          The design documents from the main repository, readable here. New to
+          Asupersync? Open the on-ramp under Start Here first.
         </p>
       </div>
       <SpecViewerLoader />

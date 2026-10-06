@@ -164,22 +164,21 @@ E (Config) → D (Instrumentation) → B (Regions) → A (Tasks) → C (Obligati
 Run the contention harness with structured artifacts:
 
 ```bash
-cargo test --test contention_e2e --features lock-metrics -- --nocapture
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_runtime_state_contention_docs cargo test --test contention_e2e --features lock-metrics -- --nocapture
 ```
 
 Artifacts are written to `target/contention/` when the directory exists or
 `CI=1` is set. You can also force a custom location:
 
 ```bash
-ASUPERSYNC_CONTENTION_ARTIFACTS_DIR=target/contention \
-  cargo test --test contention_e2e --features lock-metrics -- --nocapture
+rch exec -- env ASUPERSYNC_CONTENTION_ARTIFACTS_DIR=target/contention CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_runtime_state_contention_docs cargo test --test contention_e2e --features lock-metrics -- --nocapture
 ```
 
 Related E2E tests (structured logs + traces):
 
 ```bash
-cargo test --test runtime_e2e -- --nocapture
-cargo test --test obligation_lifecycle_e2e -- --nocapture
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_runtime_state_contention_docs cargo test --test runtime_e2e -- --nocapture
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_runtime_state_contention_docs cargo test --test obligation_lifecycle_e2e -- --nocapture
 ```
 
 4. **A (Tasks)** before C — task completion triggers orphan obligation abort.
@@ -546,9 +545,121 @@ When reviewing sharding PRs, verify:
 - [ ] **Obligation orphan scan**: task_completed holds A+C simultaneously
 - [ ] **No shard leak**: Shard locks not exposed to task code (only through Cx/scope)
 - [ ] **Config immutability**: Shard E has no lock; all fields are read-only after init
-- [ ] **Instrumentation lock-free**: Shard D trace/metrics accessed without any shard lock
+- [ ] **Instrumentation isolation**: Shard D trace/metrics do not add a
+      `ShardGuard` lock, and any internal instrumentation mutex must not
+      re-enter shard mutation while held
 - [ ] **Test coverage**: New tests for each affected cross-shard operation
 - [ ] **Benchmark comparison**: Pre/post contention numbers from bd-3urgh baseline
+
+## Checked Lock-Order Inventory (asupersync-lock-order-deadlock-proof-dw03gl.1)
+
+`artifacts/lock_order_inventory_v1.json` is the machine-checked L1 inventory for
+the lock-order/deadlock proof track. It lists the current rank map, the
+`ShardedState` shard locks, `ShardGuard` constructors, selected high-value
+`ContendedMutex::new` test surfaces, legacy unknown-rank locks, and hidden
+instrumentation mutexes behind trace/evidence handles.
+
+The artifact is checked by `tests/lock_order_inventory_contract.rs`. The focused
+remote proof lane is:
+
+```bash
+RCH_REQUIRE_REMOTE=1 rch exec -- env CARGO_INCREMENTAL=0 CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_lock_order_inventory_contract CARGO_PROFILE_TEST_DEBUG=0 RUSTFLAGS='-C debuginfo=0' cargo test -p asupersync --test lock_order_inventory_contract -- --nocapture
+```
+
+No-claim boundaries: this inventory is not a broad scheduler performance proof,
+not a global third-party deadlock proof for every `parking_lot`/`std` mutex, and
+not a replacement for sharded-state conformance or lab replay.
+
+## NUMA Ready-Queue Sharding Evaluation (asupersync-c8thc8.7)
+
+This is an audit and benchmark plan, not approval for a scheduler rewrite. The
+current runnable benchmark surface is already sufficient to measure the first
+NUMA-ready-queue question: whether a global ingress queue and worker-local ready
+phase become bottlenecks on 64+ logical CPU hosts before any new queue topology
+is introduced.
+
+### Current Contention Points
+
+| Surface | Evidence path | What it measures |
+|---------|---------------|------------------|
+| Global ready ingress | `benches/scheduler_benchmark.rs::run_global_ready_contention_case` and `scheduler/global_ready_contention/inject_ready_then_drain/{1,8,32,64}` | Concurrent producer calls to `ThreeLaneScheduler::inject_ready` followed by a drain through one worker. |
+| Worker ready drain | `scheduler/three_lane_decision/global_ready_burst/{64,512}` | Cost of draining globally injected ready work through `Worker::bench_try_phase3_ready_work`. |
+| Local ready fast path | `scheduler/three_lane_decision/fast_ready_uncontended` | Baseline cost when a ready task can stay worker-local. |
+| Local contention fallback | `scheduler/three_lane_decision/fast_ready_local_peek_contended` | Cost when the worker observes local-priority-scheduler lock contention before falling through. |
+| Cancel/ready fairness | `scheduler/adaptive_cancel_streak/cancel_ready_mixed/{2,4,8,16}` and `ready_stall_depth/{2,4,8}` | Whether cancel dominance delays ready work beyond the cancel-streak bound. |
+| Evidence capture overhead | `scheduler/three_lane_decision/global_ready_burst_evidence_{off,on}` | Overhead of collecting scheduler evidence while draining ready bursts. |
+
+The existing p999 receipt
+`tests/artifacts/perf/asupersync-h6pjqb/scheduler_p999_latency_receipt_v1.json`
+is the current baseline artifact for a 64-logical-CPU / 252 GiB host. It
+records `scheduler/three_lane_decision` results for `fast_ready_uncontended`,
+`fast_ready_local_peek_contended`, `global_ready_burst/{64,512}`, and evidence
+capture on/off. It is single-host baseline evidence only; it does not prove a
+speedup, and future before/after claims must compare runs from the same host
+class and preferably the same rch worker.
+
+Focused smoke validation for this audit ran through rch on 2026-05-18:
+
+```bash
+RCH_REQUIRE_REMOTE=1 rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_amberrabbit_numa_ready_queue_20260518 CARGO_INCREMENTAL=0 CARGO_PROFILE_BENCH_DEBUG=0 RUSTFLAGS='-C debuginfo=0' cargo bench -p asupersync --features criterion-benches --bench scheduler_benchmark -- scheduler/three_lane_decision/global_ready_burst/64 --sample-size 10 --measurement-time 1
+```
+
+Result: remote worker `ts2`, exit 0, `[35.346 us 35.564 us 35.776 us]`
+latency interval and `[1.7889 Melem/s 1.7996 Melem/s 1.8107 Melem/s]`
+throughput interval. This proves the focused benchmark lane is runnable; it is
+not a NUMA speedup claim.
+
+### Lock-Order Constraints for NUMA Queue Work
+
+NUMA-aware ready queues may partition queue storage or ingress tokens, but they
+must not introduce a new reverse edge into the existing shard order:
+
+- Ready ingress may acquire no runtime shard locks, or at most the A/Task hot
+  path needed for task scheduling state. It must not acquire B/Regions after A.
+- Worker-local and NUMA-local ready queues must remain scheduler-owned data
+  structures. Task completion, cancellation, and obligation cleanup still use
+  the B -> A -> C guard constructors documented above.
+- Cross-NUMA stealing must snapshot candidate workers/queues without holding
+  B/A/C locks across remote queue probes.
+- Any topology metadata belongs in E/Config if read-only after runtime
+  construction, or in scheduler-owned atomics if it changes at runtime. It must
+  not require holding C/Obligations to choose a ready queue.
+- Trace/metrics for NUMA routing belong on the existing D/Instrumentation path
+  and must remain outside ready-queue critical sections except for bounded,
+  feature-gated evidence capture.
+
+### Benchmark Design
+
+Future NUMA-ready-queue beads should use the current benchmarks as the control
+surface before adding new benchmark cases:
+
+1. **Throughput**: compare `scheduler/global_ready_contention` producer counts
+   `{1,8,32,64}` and `scheduler/three_lane_decision/global_ready_burst/{64,512}`.
+   Record Criterion throughput intervals, not only wall time.
+2. **Admission latency**: derive p50/p95/p99/p999 per-iteration latency from
+   Criterion `sample.json`, using the receipt method from
+   `scheduler_p999_latency_receipt_v1.json`.
+3. **Fairness**: keep `cancel_ready_mixed` and `ready_stall_depth` green, with no
+   regression in ready dispatch steps under cancel floods.
+4. **Cancellation/drain overhead**: pair ready-queue changes with the existing
+   cancel/drain benchmark lanes before claiming scheduler-wide improvement.
+5. **Evidence overhead**: compare evidence on/off ready bursts so topology
+   telemetry does not become the new hot path.
+
+### Decision Rules
+
+- Do not ship a NUMA topology change from cross-host comparisons. The minimum
+  acceptable claim is same-host before/after data with host class, worker id,
+  CPU count, RAM, kernel, rustc, and cargo versions captured in the receipt.
+- Require improvement in at least one ready-ingress or ready-drain throughput
+  case and no material p95/p99/p999, fairness, cancel/drain, or evidence-capture
+  regression.
+- Prefer a topology-selection prototype behind an internal runtime config flag
+  until replay determinism, lock-order guard tests, and the benchmark matrix all
+  pass through rch.
+- If data shows the bottleneck is local-priority lock contention rather than
+  global ingress, file the next bead against local queue contention instead of
+  adding NUMA shards.
 
 ## Migration + Rollback Runbook (bd-2f7uj)
 
@@ -580,16 +691,13 @@ When reviewing sharding PRs, verify:
 Baseline (current unified layout):
 
 ```bash
-ASUPERSYNC_CONTENTION_ARTIFACTS_DIR=target/contention/unified \
-  cargo test --test contention_e2e --features lock-metrics -- --nocapture
+rch exec -- env ASUPERSYNC_CONTENTION_ARTIFACTS_DIR=target/contention/unified CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_runtime_state_contention_docs cargo test --test contention_e2e --features lock-metrics -- --nocapture
 ```
 
 Replay determinism sweep (artifact-friendly):
 
 ```bash
-ASUPERSYNC_REPLAY_ARTIFACTS_DIR=target/replay/unified \
-ASUPERSYNC_REPLAY_PARITY_ITERS=1000 \
-cargo test --test replay_e2e_suite deterministic_replay_parity_seed_sweep_1000 -- --nocapture
+rch exec -- env ASUPERSYNC_REPLAY_ARTIFACTS_DIR=target/replay/unified ASUPERSYNC_REPLAY_PARITY_ITERS=1000 CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_runtime_state_contention_docs cargo test --test replay_e2e_suite deterministic_replay_parity_seed_sweep_1000 -- --nocapture
 ```
 
 After layout toggle lands, run the same commands with the sharded layout
@@ -622,12 +730,12 @@ Rollback triggers:
 ### Validation Checklist (Gate Before Default Flip)
 
 ```bash
-cargo fmt --check
-cargo check --all-targets
-cargo clippy --all-targets -- -D warnings
-cargo test
-cargo test --test contention_e2e --features lock-metrics -- --nocapture
-cargo test --test replay_e2e_suite deterministic_replay_parity_seed_sweep_1000 -- --nocapture
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_runtime_state_contention_docs cargo fmt --check
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_runtime_state_contention_docs cargo check --all-targets
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_runtime_state_contention_docs cargo clippy --all-targets -- -D warnings
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_runtime_state_contention_docs cargo test
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_runtime_state_contention_docs cargo test --test contention_e2e --features lock-metrics -- --nocapture
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_runtime_state_contention_docs cargo test --test replay_e2e_suite deterministic_replay_parity_seed_sweep_1000 -- --nocapture
 ```
 
 Acceptance signal for flipping default:

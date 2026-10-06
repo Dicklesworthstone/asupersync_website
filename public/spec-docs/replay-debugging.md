@@ -41,6 +41,140 @@ Deterministic replay only works when the environment is fully controlled. The co
 
 If any precondition is violated, replay should fail fast with explicit diagnostics rather than “best-effort.”
 
+### Lab-Test Crashpack Replay
+
+Auto-crashpacks produced by `#[lab_test]` and `#[explore_seeds]` record the
+exact libtest name, seed, worker count, step limit, and (when the source tree
+was clean at build time) Git revision. Their generated replay command uses the
+same environment variables consumed by the test harness:
+
+```sh
+ASUPERSYNC_LAB_TEST_SEED=42 ASUPERSYNC_WORKERS=4 \
+ASUPERSYNC_MAX_STEPS=1000 cargo test lab::tests::case -- --exact --nocapture
+```
+
+The seed override runs exactly one seed even when the original attribute
+declared a range. `ASUPERSYNC_MAX_STEPS=none` reproduces an unlimited step
+budget. The command deliberately names no crashpack argument: libtest does not
+accept one, and the crashpack is evidence used to construct the replay rather
+than a positional test input.
+
+Builds outside a clean repository may set `ASUPERSYNC_GIT_COMMIT` to a 40- or
+64-digit hexadecimal revision. Without a clean package-root checkout or that
+explicit input, the crashpack omits `commit_hash` instead of making a stale
+provenance claim.
+
+## Production schedule projection (what a production trace can re-drive)
+
+`Runtime::trace_snapshot()` exports the production ring buffer in the same
+`TraceEvent` schema the lab records. Enable
+`RuntimeBuilder::capture_schedules(true)` before building to include actual
+native dispatch, poll-entry, wake, yield, and cancellation-ack observations.
+Capture is off by default. Its task ids are arena slots with generations that
+a fresh lab run need not reproduce.
+`asupersync::trace::ProductionSchedule` reduces such a trace to what the lab
+can re-drive:
+
+| Production event | Projected replay event | Note |
+|---|---|---|
+| `Spawn` | `TaskSpawned { task, region, at_tick }` | assigns the task its **spawn ordinal**; the replay binds lab ids to recorded ids in this order |
+| `Poll` | `TaskScheduled { task, at_tick }` | one **step** per poll; if the trace has no `Poll` events at all, `Schedule` events are the steps instead (`summary().steps_from_schedule_events`) |
+| `Yield`, `Complete` | `TaskYielded`, `TaskCompleted { outcome: 0 }` | the production trace records no outcome severity |
+| `TimeAdvance`, `TimerScheduled/Fired/Cancelled` | `TimeAdvanced`, `TimerCreated/Fired/Cancelled` | hints only; the lab clock is virtual |
+| I/O, obligation, region, cancellation, wake events | dropped, counted in `summary().skipped` | outcomes to re-inject, not decisions to re-drive |
+
+`at_tick` is the production sequence number, monotone within the trace.
+
+For a replayable native capture, prefer `Runtime::schedule_capture_snapshot()`
+and its checked `production_schedule()` method. The immutable snapshot carries
+the atomic insertion count, retained event count, worker identity and per-worker
+sequence for scheduler observations. Wake delivery is unattributed because a
+Waker can be called from any thread. The checked projection rejects ring
+eviction, absent poll/context observations, invalid task lifecycles and tasks
+that have not yet completed. The trace-storage profile bounds both events and
+context metadata. A live snapshot can be inspected even when it is incomplete.
+A snapshot in which every recorded task completed does not attest runtime
+quiescence or the absence of pending admissions: another task may not have
+entered the recorded task set yet. Establish that boundary in the source
+workload before treating the capture as its complete execution.
+
+The capture also keeps each task's terminal outcome (Ok, Err, Cancelled or
+Panicked) beside its Complete event: `ScheduleCaptureSnapshot::terminal_outcomes()`
+lists them and `production_schedule()` carries them into the projected
+completions. `LabRuntime::run_production_schedule_strict` then compares each
+recorded task's outcome with the Lab's, and a reconstruction in which a task
+ends differently is reported as `OutcomeMismatch`, not `Matched`. The values
+tasks return are not compared; check them in the harness. A task whose future
+panicked is recorded Panicked whichever API spawned it: `RuntimeHandle::spawn`
+also re-raises the payload on its `JoinHandle`, and a state task such as a Lab
+reconstruction records Panicked too.
+
+Raw projection: a task that acts before its `Spawn` means the ring buffer
+truncated the trace (or it was filtered). `ProductionSchedule::from_runtime_trace`
+refuses with `ProjectionError::MissingSpawn { task, seq, kind }` rather than
+replaying a partial history; `from_runtime_trace_with(ProjectionOptions {
+allow_orphans: true })` admits such tasks at first sight and lists them in
+`summary().orphans`, which is the right choice for a long-running service
+whose early spawns predate the ring window. A duplicate `Spawn` for one id is
+an error. A spawn-only raw projection can have zero steps; it is not sufficient
+to replay and the checked capture API rejects it. Sequence gaps alone do not
+prove loss because the runtime may reserve and abandon an event sequence.
+
+```rust
+let runtime = asupersync::runtime::RuntimeBuilder::new()
+    .capture_schedules(true)
+    .build()?;
+// Run and await the workload. Observe task retirement before taking a complete snapshot.
+let capture = runtime.schedule_capture_snapshot().expect("capture enabled");
+let schedule = capture.production_schedule()?;
+for (spawn_ordinal, tick) in schedule.steps() {
+    // the recorded interleaving: which task (by birth order) was polled, when
+}
+let replay_trace = schedule.into_trace(); // feeds trace::replayer::TraceReplayer
+```
+
+Reconstruct the task workload and external inputs in a fresh `LabRuntime`, then
+call `run_production_schedule_strict` with explicit
+`StrictProductionReplayLimits`. Its typed receipt requires exact retained
+choice consumption, matching spawn counts, quiescence, and passing lab checks.
+The default `replay_production_schedule` also stops before unrecorded work;
+`replay_production_schedule_prefix` explicitly enables exploratory continuation
+and reports `Prefix` through `production_replay_boundary`.
+
+This captures poll-entry order, including polls that overlap on different
+workers. It does not replay instruction-level parallelism, I/O values, entropy,
+or arbitrary user effects. Supply those inputs independently and compare the
+workload's terminal values. The bounded capture detects ring eviction; an
+unvalidated raw slice carries no equivalent completeness evidence.
+
+## Golden Replay-Delta Verification
+
+When the same scenario is expected to remain stable across releases, compare
+its golden fixtures instead of only checking pass/fail.
+
+- Build fixtures from deterministic runs (`GoldenTraceFixture::from_events`).
+- Compare expected vs actual using `delta_report`.
+- Persist the JSON report as CI artifact for triage.
+- Emit a triage bundle with a one-command repro string for fast incident handoff.
+
+```rust
+use asupersync::trace::format::{GoldenTraceConfig, GoldenTraceFixture};
+
+let expected = GoldenTraceFixture::from_events(cfg.clone(), &expected_events, std::iter::empty::<String>());
+let actual = GoldenTraceFixture::from_events(cfg, &actual_events, std::iter::empty::<String>());
+let report = expected.delta_report(&actual);
+
+assert!(report.is_clean(), "golden replay drift detected: {}", report.to_json()?);
+```
+
+The report classifies drift into `config`, `timing`, `semantic`, and `observability` and
+includes per-field mismatch entries (`fingerprint`, `canonical_prefix`,
+`event_count`, `oracle_violations`, etc.) for stable machine parsing.
+
+In CI/E2E flows, write both:
+- `golden_trace_replay_delta_report.json` (full drift report)
+- `golden_trace_replay_delta_triage_bundle.json` (scenario metadata, drift fields, repro command)
+
 ---
 
 ## Schedule Exploration (Seed Sweep + DPOR)
@@ -175,6 +309,40 @@ $ASUPERSYNC_TEST_ARTIFACTS_DIR/
 - The seed is stored in `repro_manifest.json` (future work may add a seed-hash
   subdirectory when bd-30pc lands).
 
+### Artifact Lifecycle (Local + CI)
+
+Artifact storage, retention, redaction, and retrieval are explicit:
+
+- Storage:
+  - Failure bundles: `$ASUPERSYNC_TEST_ARTIFACTS_DIR/{test_id}/...`
+  - E2E suite artifacts: `target/e2e-results/<suite>/`
+  - Orchestrator reports: `target/e2e-results/orchestrator_<timestamp>/`
+- Retention defaults:
+  - local runs: `ARTIFACT_RETENTION_DAYS_LOCAL=14`
+  - CI runs: `ARTIFACT_RETENTION_DAYS_CI=30`
+- Redaction policy:
+  - `ARTIFACT_REDACTION_MODE=metadata_only` by default
+  - accepted values: `metadata_only`, `none`, `strict`
+  - CI-allowed values: `metadata_only`, `strict` (`none` is local-only)
+  - required redacted fields include: `suite_log`
+- Privacy contract source:
+  - `.github/security_release_policy.json` (`trace_telemetry_privacy`)
+  - schema: `trace-telemetry-privacy-v1`
+- Retrieval:
+  - rerun one suite: `bash ./scripts/run_all_e2e.sh --suite <suite>`
+  - verify matrix + lifecycle contract: `bash ./scripts/run_all_e2e.sh --verify-matrix`
+
+The orchestrator emits a deterministic lifecycle descriptor:
+`target/e2e-results/orchestrator_<timestamp>/artifact_lifecycle_policy.json`
+containing retention settings, redaction mode, suite artifact roots, and replay commands.
+
+In CI, the D4 matrix gate enforces the privacy policy contract:
+- retention must be numeric and <= CI cap
+- redaction mode must be in the CI-allowed set
+- required redacted fields must be present
+- storage roots must match approved artifact path fragments
+- suites must keep replay/artifact routing enabled
+
 **`repro_manifest.json` schema (minimum, current):**
 ```json
 {
@@ -204,6 +372,65 @@ $ASUPERSYNC_TEST_ARTIFACTS_DIR/
 3. Re-run with `ASUPERSYNC_SEED` and same inputs (or load `trace.async` directly).
 4. If divergence happens, emit a **divergence artifact** with the first mismatched event.
 
+## WASM Incident Forensics Playbook (asupersync-umelq.12.5)
+
+This section defines the canonical browser-incident triage workflow and the
+minimum evidence required before closure.
+
+### Operator Workflow
+
+1. `intake`: classify symptom and severity (`sev1|sev2|sev3`), assign incident
+   owner, and attach initial artifact pointer.
+2. `replay`: run deterministic replay with pinned seed and scenario.
+3. `diagnose`: compare expected/observed replay outputs and capture divergence
+   or confidence evidence.
+4. `contain`: apply mitigation (fallback, rollback, or channel hold) and
+   document the exact command path used.
+5. `closure`: verify replay is reproducible, evidence is complete, and handoff
+   notes include next actions.
+
+### Canonical Commands
+
+```bash
+# 1) Deterministic replay drill (writes summary + repro bundle artifacts)
+TEST_SEED=4242 bash ./scripts/test_wasm_incident_forensics_e2e.sh
+
+# 1b) Contract-only fallback (when remote compile fleet is saturated)
+INCIDENT_FORENSICS_DRY_RUN=1 TEST_SEED=4242 bash ./scripts/test_wasm_incident_forensics_e2e.sh
+
+# 2) Single-suite orchestration path (for matrix + replay command routing)
+bash ./scripts/run_all_e2e.sh --suite wasm-incident-forensics
+
+# 3) Playbook/docs contract check (fails on command or artifact drift)
+python3 ./scripts/check_incident_forensics_playbook.py
+
+# 4) Direct replay command template (always offload cargo-heavy execution)
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_replay_debugging_docs cargo run --quiet --features cli --bin asupersync -- --format json --color never \
+  lab replay examples/scenarios/smoke_happy_path.yaml \
+  --seed 4242 \
+  --artifact-pointer artifacts/replay/wasm-incident-smoke-4242.json \
+  --artifact-output target/e2e-results/wasm_incident_forensics/replay_report.json \
+  --window-start 1 \
+  --window-events 10
+```
+
+### Required Evidence Bundle
+
+- `target/e2e-results/wasm_incident_forensics/artifacts_<timestamp>/summary.json`
+- `target/e2e-results/wasm_incident_forensics/artifacts_<timestamp>/incident_summary.json`
+- `target/e2e-results/wasm_incident_forensics/artifacts_<timestamp>/incident_events.ndjson`
+- `target/e2e-results/wasm_incident_forensics/artifacts_<timestamp>/repro_bundle.json`
+- replay output payload (`replay_run1.json`, `replay_run2.json`) and
+  expected-failure probe log (`expected_failure.log`)
+
+### Handoff Contract
+
+| Role | Required handoff fields |
+|------|-------------------------|
+| Incident owner | `incident_id`, `severity`, `seed`, `repro_command`, `artifact_dir` |
+| Runtime responder | mitigation action, containment status, fallback mode, ETA |
+| Verification reviewer | deterministic replay status, divergence status, closure recommendation |
+
 ### Failure Triage + Repro Pipeline (bd-1ex7)
 
 This is the standard failure triage pipeline used across unit, integration,
@@ -225,12 +452,12 @@ failure without guesswork.
 
 **Fast local repro workflow:**
 1. Read `seed` + `test_id` from `repro_manifest.json` or the failure summary.
-2. Re-run locally:
-   `ASUPERSYNC_SEED=<seed> ASUPERSYNC_TEST_ARTIFACTS_DIR=target/test-artifacts cargo test <test_id> -- --nocapture`
+2. Re-run through `rch`:
+   `rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_replay_debugging_repro ASUPERSYNC_SEED=<seed> ASUPERSYNC_TEST_ARTIFACTS_DIR=target/test-artifacts cargo test <test_id> -- --nocapture`
 3. Inspect trace artifacts (if present):
-   `cargo run --bin asupersync trace info <trace.async>`
+   `rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_replay_debugging_repro cargo run --bin asupersync trace info <trace.async>`
 4. If two traces differ, use:
-   `cargo run --bin asupersync trace diff <trace_a> <trace_b>`
+   `rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_replay_debugging_repro cargo run --bin asupersync trace diff <trace_a> <trace_b>`
 
 ### Deterministic Logging Rules (Reference)
 
@@ -247,7 +474,7 @@ failure without guesswork.
 | Cancellation misbehavior | **Yes** - Trace cancellation propagation step by step |
 | Timer interaction bugs | **Yes** - See exact firing order |
 | Performance investigation | Maybe - Traces add overhead; use for correctness first |
-| Production debugging | **Yes** - If you captured a trace before the bug |
+| Production debugging | **Partly** - `Runtime::trace_snapshot()` exports the production ring buffer (default 4096 events) for offline analysis (canonicalization, happens-before, race detection). Schedule re-execution of a production interleaving is not available; replay drives lab-recorded runs. |
 
 ---
 
@@ -258,17 +485,27 @@ failure without guesswork.
 Enable replay recording when creating the Lab runtime:
 
 ```rust
-use asupersync::lab::{LabConfig, LabRuntime};
+use asupersync::{Cx, LabConfig, LabRuntime, Outcome, Scope};
 use asupersync::trace::{RecorderConfig, TraceRecorder};
+use asupersync::types::{policy::FailFast, Budget};
 
 // Enable recording with default config
 let config = LabConfig::new(42)
     .with_default_replay_recording();
 
 let mut runtime = LabRuntime::new(config);
+let root = runtime.state.create_root_region(Budget::INFINITE);
+let cx = Cx::for_testing();
+let scope = Scope::<FailFast>::new(root, Budget::INFINITE);
 
-// Run your test
-runtime.spawn_root(my_async_task);
+// Spawn the root task explicitly, then enqueue it.
+let handle = scope
+    .spawn_registered(&mut runtime.state, &cx, |_task_cx| async move {
+        // Exercise the code under test here.
+        Outcome::ok(())
+    })
+    .expect("spawn root task");
+runtime.scheduler.lock().schedule(handle.task_id(), 0);
 runtime.run_until_quiescent();
 ```
 
@@ -590,24 +827,42 @@ fn analyze_race() {
 **Problem**: A task doesn't clean up properly when cancelled.
 
 ```rust
+use asupersync::{CancelReason, Cx, LabConfig, LabRuntime, Outcome, Scope};
+use asupersync::time::{sleep, wall_now};
+use asupersync::types::{policy::FailFast, Budget};
+use std::time::Duration;
+
 #[test]
 fn test_cancellation_cleanup() {
     let config = LabConfig::new(42)
         .with_default_replay_recording();
     let mut runtime = LabRuntime::new(config);
+    let root = runtime.state.create_root_region(Budget::INFINITE);
+    let cx = Cx::for_testing();
+    let scope = Scope::<FailFast>::new(root, Budget::INFINITE);
 
     // Spawn a task and cancel it mid-operation
-    let handle = runtime.spawn_root(async |cx| {
-        let _permit = resource.acquire(cx).await?;
-        // Long operation that gets cancelled
-        cx.sleep(Duration::from_secs(10)).await;
-        // Cleanup code that should run
-        permit.release();
-        Outcome::ok(())
-    });
+    let handle = scope
+        .spawn_registered(&mut runtime.state, &cx, |task_cx| async move {
+            let permit = resource.acquire(&task_cx).await.expect("acquire permit");
+            let now = task_cx.timer_driver().map_or_else(wall_now, |driver| driver.now());
+            // Long operation that gets cancelled
+            sleep(now, Duration::from_secs(10)).await;
+            // Cleanup code that should run
+            permit.release();
+            Outcome::ok(())
+        })
+        .expect("spawn cancellable task");
 
+    runtime.scheduler.lock().schedule(handle.task_id(), 0);
     runtime.step_n(100);
-    runtime.cancel(handle);
+    let cancel_reason = CancelReason::user("debug cancellation");
+    let cancelled = runtime.state.cancel_task(handle.task_id(), &cancel_reason);
+    assert!(cancelled, "task should accept cancellation");
+    runtime.scheduler.lock().schedule_cancel(
+        handle.task_id(),
+        cancel_reason.cleanup_budget().priority,
+    );
     runtime.run_until_quiescent();
 
     // Bug: permit wasn't released!
@@ -657,30 +912,42 @@ fn analyze_cancellation() {
 **Problem**: Timers fire in unexpected order.
 
 ```rust
+use asupersync::{join, Cx, LabConfig, LabRuntime, Outcome, Scope};
+use asupersync::time::{sleep, wall_now};
+use asupersync::types::{policy::FailFast, Budget};
+use std::time::Duration;
+
 #[test]
 fn test_timer_ordering() {
     let config = LabConfig::new(42)
         .with_default_replay_recording();
     let mut runtime = LabRuntime::new(config);
+    let root = runtime.state.create_root_region(Budget::INFINITE);
+    let cx = Cx::for_testing();
+    let scope = Scope::<FailFast>::new(root, Budget::INFINITE);
 
-    runtime.spawn_root(async |cx| {
-        // These should complete in order
-        let t1 = cx.sleep(Duration::from_millis(100));
-        let t2 = cx.sleep(Duration::from_millis(200));
-        let t3 = cx.sleep(Duration::from_millis(300));
+    let handle = scope
+        .spawn_registered(&mut runtime.state, &cx, |task_cx| async move {
+            let now = task_cx.timer_driver().map_or_else(wall_now, |driver| driver.now());
+            // These should complete in order
+            let t1 = sleep(now, Duration::from_millis(100));
+            let t2 = sleep(now, Duration::from_millis(200));
+            let t3 = sleep(now, Duration::from_millis(300));
 
-        let mut order = vec![];
+            let mut order = vec![];
 
-        join!(
-            async { t1.await; order.push(1); },
-            async { t2.await; order.push(2); },
-            async { t3.await; order.push(3); },
-        );
+            join!(
+                async { t1.await; order.push(1); },
+                async { t2.await; order.push(2); },
+                async { t3.await; order.push(3); },
+            );
 
-        assert_eq!(order, vec![1, 2, 3], "Timers fired out of order!");
-        Outcome::ok(())
-    });
+            assert_eq!(order, vec![1, 2, 3], "Timers fired out of order!");
+            Outcome::ok(())
+        })
+        .expect("spawn timer task");
 
+    runtime.scheduler.lock().schedule(handle.task_id(), 0);
     runtime.run_until_quiescent();
 }
 ```
@@ -757,22 +1024,24 @@ tests/
     issue_456_cancellation_leak.trace
 ```
 
-Then add regression tests:
+Then add regression tests that load the saved trace and run the analysis
+that caught the bug (see `tests/runtime_trace_export_e2e.rs` for the
+production export path end to end):
 
 ```rust
-#[test]
-fn regression_issue_123() {
-    let trace = TraceReader::open("tests/traces/issue_123_race_condition.trace")
-        .unwrap()
-        .read_all()
-        .unwrap();
+use asupersync::runtime::RuntimeBuilder;
+use asupersync::trace::{RaceDetector, normalize_trace_default};
 
-    // Replay with the fixed code
-    let mut replayer = TraceReplayer::new(trace);
+// Export the production ring buffer (default 4096 events) after the
+// suspicious run; save it with serde_json for later.
+let runtime = RuntimeBuilder::multi_thread().build()?;
+runtime.block_on(app());
+let events = runtime.trace_snapshot();
 
-    // Verify the fix - execution should now diverge at the bug point
-    // in a good way (the fix prevents the race)
-}
+// Offline: canonicalize and look for races in the exported trace.
+let (canonical, _geodesic) = normalize_trace_default(&events);
+let detector = RaceDetector::from_trace(&canonical);
+assert_eq!(detector.race_count(), 0, "the fix removed the race");
 ```
 
 ### Combine with Tracing
@@ -931,20 +1200,45 @@ pub enum Breakpoint {
 ```rust
 // Writing
 let mut writer = TraceWriter::create("trace.bin")?;
-writer.write_trace(&trace)?;
+writer.write_metadata(&trace.metadata)?;
+for event in &trace.events {
+    writer.write_event(event)?;
+}
 writer.finish()?;
 
-// Reading
+// Reading all events
 let reader = TraceReader::open("trace.bin")?;
-let metadata = reader.metadata();
-let trace = reader.read_all()?;
+let file_version = reader.file_version();
+let metadata = reader.metadata().clone();
+let events = reader.load_all()?;
 
 // Streaming read (large traces)
+let reader = TraceReader::open("trace.bin")?;
 for event in reader.events() {
     let event = event?;
     // process event
 }
 ```
+
+Current writers emit checksummed container version 3. Readers accept supported
+legacy v1/v2 containers, but embedded replay metadata must still use the exact
+supported replay schema. Unknown versions, records, checksum mismatches, and
+truncation fail closed.
+
+Use a distinct destination to migrate a legacy container while retaining the
+source as a rollback anchor:
+
+```text
+asupersync trace migrate legacy-v2.trace current-v3.trace
+```
+
+The destination must not exist and the source must be v1 or v2. For damaged
+input, `recover_trace_prefix(path, max_events)` returns only the contiguous
+decoded prefix plus an explicit `Complete`, `Partial`, or `LimitReached`
+status. Recovery never skips a corrupt event and does not convert a partial
+trace into deterministic replay proof. For v3, only `Complete` authenticates
+the whole event stream; partial and limit-reached receipts are decoded prefixes,
+not checksum admission.
 
 ### ReplayEvent Variants
 

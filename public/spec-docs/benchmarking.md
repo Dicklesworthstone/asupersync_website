@@ -7,22 +7,27 @@ Asupersync uses [Criterion.rs](https://crates.io/crates/criterion) for statistic
 ## Quick Start
 
 ```bash
+export BENCH_CARGO_PROFILE=release-perf
+export BENCH_RUSTFLAGS="-C force-frame-pointers=yes"
+export BENCH_FEATURES=criterion-benches
+export RCH_BUILD_TIMEOUT_SEC="${RCH_BUILD_TIMEOUT_SEC:-5400}"
+
 # Run all benchmarks (saves to target/criterion/)
-cargo bench
+rch exec -- env RUSTFLAGS="$BENCH_RUSTFLAGS" CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo bench --profile "$BENCH_CARGO_PROFILE" --features "$BENCH_FEATURES"
 
 # Run specific benchmark suite
-cargo bench --bench phase0_baseline
-cargo bench --bench scheduler_benchmark
-cargo bench --bench protocol_benchmark
-cargo bench --bench timer_wheel
-cargo bench --bench tracing_overhead
-cargo bench --bench reactor_benchmark
+rch exec -- env RUSTFLAGS="$BENCH_RUSTFLAGS" CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo bench --profile "$BENCH_CARGO_PROFILE" --features "$BENCH_FEATURES" --bench phase0_baseline
+rch exec -- env RUSTFLAGS="$BENCH_RUSTFLAGS" CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo bench --profile "$BENCH_CARGO_PROFILE" --features "$BENCH_FEATURES" --bench scheduler_benchmark
+rch exec -- env RUSTFLAGS="$BENCH_RUSTFLAGS" CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo bench --profile "$BENCH_CARGO_PROFILE" --features "$BENCH_FEATURES" --bench protocol_benchmark
+rch exec -- env RUSTFLAGS="$BENCH_RUSTFLAGS" CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo bench --profile "$BENCH_CARGO_PROFILE" --features "$BENCH_FEATURES" --bench timer_wheel
+rch exec -- env RUSTFLAGS="$BENCH_RUSTFLAGS" CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo bench --profile "$BENCH_CARGO_PROFILE" --features "$BENCH_FEATURES" --bench tracing_overhead
+rch exec -- env RUSTFLAGS="$BENCH_RUSTFLAGS" CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo bench --profile "$BENCH_CARGO_PROFILE" --features "$BENCH_FEATURES" --bench reactor_benchmark
 
 # Save a named baseline for comparison
-cargo bench -- --save-baseline initial --noplot
+rch exec -- env RUSTFLAGS="$BENCH_RUSTFLAGS" CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo bench --profile "$BENCH_CARGO_PROFILE" --features "$BENCH_FEATURES" -- --save-baseline initial --noplot
 
 # Compare against a baseline
-cargo bench -- --baseline initial --noplot
+rch exec -- env RUSTFLAGS="$BENCH_RUSTFLAGS" CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo bench --profile "$BENCH_CARGO_PROFILE" --features "$BENCH_FEATURES" -- --baseline initial --noplot
 ```
 
 ## Extreme Optimization Loop (bd-4bfy4)
@@ -43,6 +48,13 @@ Example baseline + smoke capture:
 ./scripts/capture_baseline.sh --smoke --seed 3735928559 --save baselines/
 ```
 
+The helper script above requires `rch` to be reachable via `RCH_BIN`
+(default: `rch` on `PATH`) for benchmark execution. It now fails closed rather
+than silently running a local benchmark fallback. Its default `--run` and
+`--smoke` benchmark path sets `RCH_BUILD_TIMEOUT_SEC=5400` unless the caller
+already provided a different value, because cold `release-perf` /
+`phase0_baseline` sweeps can exceed rch's default 1200-second command timeout.
+
 ### Smoke Report Schema (artifact manifest)
 
 The smoke report produced by `--smoke` is the canonical artifact manifest for
@@ -52,7 +64,7 @@ available):
 ```json
 {
   "generated_at": "2026-02-03T19:00:00Z",
-  "command": "cargo bench --bench phase0_baseline",
+  "command": "rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo bench --features criterion-benches --bench phase0_baseline",
   "seed": "3735928559",
   "criterion_dir": "target/criterion",
   "baseline_path": "baselines/baseline_20260203_190000.json",
@@ -138,19 +150,16 @@ Requires `cargo-flamegraph` and `perf` on Linux.
 
 ```bash
 # Install once
-cargo install flamegraph
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo install flamegraph
 
 # Scheduler hot path (release build with frame pointers)
-RUSTFLAGS="-C force-frame-pointers=yes" \
-cargo flamegraph --bench scheduler_benchmark -- --bench
+rch exec -- env RUSTFLAGS="-C force-frame-pointers=yes" CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo flamegraph --features criterion-benches --bench scheduler_benchmark -- --bench
 
 # Cancellation/combinator path
-RUSTFLAGS="-C force-frame-pointers=yes" \
-cargo flamegraph --bench protocol_benchmark -- --bench
+rch exec -- env RUSTFLAGS="-C force-frame-pointers=yes" CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo flamegraph --features criterion-benches --bench protocol_benchmark -- --bench
 
 # Trace/DPOR path
-RUSTFLAGS="-C force-frame-pointers=yes" \
-cargo flamegraph --bench tracing_overhead -- --bench
+rch exec -- env RUSTFLAGS="-C force-frame-pointers=yes" CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo flamegraph --features criterion-benches --bench tracing_overhead -- --bench
 ```
 
 Notes:
@@ -163,13 +172,13 @@ Use hyperfine to baseline CLI-style workflows with JSON export.
 
 ```bash
 # Install once
-cargo install hyperfine
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo install hyperfine
 
 # Baseline scheduler benchmark
 hyperfine \
   --warmup 2 \
   --export-json baselines/hyperfine/scheduler_benchmark.json \
-  'cargo bench --bench scheduler_benchmark'
+  'rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo bench --features criterion-benches --bench scheduler_benchmark'
 ```
 
 Notes:
@@ -185,7 +194,7 @@ Preferred path uses the built-in census script:
 ./scripts/alloc_census.sh
 
 # Scheduler benchmark with explicit tool
-./scripts/alloc_census.sh --tool heaptrack --cmd "cargo bench --bench scheduler_benchmark"
+./scripts/alloc_census.sh --tool heaptrack --cmd "rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo bench --features criterion-benches --bench scheduler_benchmark"
 ```
 
 Alternative manual tools:
@@ -210,8 +219,7 @@ Notes:
 
 ```bash
 # High-level syscall counts + time spent
-strace -f -c -o /tmp/asupersync_syscalls.txt \
-  cargo bench --bench scheduler_benchmark
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs strace -f -c -o /tmp/asupersync_syscalls.txt cargo bench --features criterion-benches --bench scheduler_benchmark
 
 # Inspect the summary
 cat /tmp/asupersync_syscalls.txt
@@ -233,6 +241,17 @@ run a smoke capture end-to-end with structured metadata.
 # End-to-end smoke run with structured report
 ./scripts/capture_baseline.sh --smoke --seed 3735928559 --save baselines/
 ```
+
+`--run` / `--smoke` require `rch` via `RCH_BIN` for the default benchmark path.
+The default run path uses Cargo profile `release-perf` and
+`RUSTFLAGS=-C force-frame-pointers=yes`; it also sets
+`RCH_BUILD_TIMEOUT_SEC=5400` unless already overridden so cold full sweeps do
+not die at rch's default 1200-second timeout. Override with
+`BENCH_CARGO_PROFILE`, `BENCH_RUSTFLAGS`, `RCH_BUILD_TIMEOUT_SEC`,
+`--cargo-profile`, or `--bench-rustflags` only when you are intentionally
+producing a differently scoped baseline.
+Read-only capture / compare flows that only parse existing Criterion output do
+not need `rch`.
 
 The smoke report is stored as `baselines/smoke_report_<timestamp>.json` and
 captures env, command, seed, git SHA, and a `config` block (criterion dir,
@@ -261,7 +280,7 @@ save dir, comparison settings).
 ```json
 {
   "generated_at": "2026-02-03T19:00:00Z",
-  "command": "cargo bench --bench phase0_baseline",
+  "command": "rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo bench --features criterion-benches --bench phase0_baseline",
   "seed": "3735928559",
   "criterion_dir": "target/criterion",
   "baseline_path": "baselines/baseline_20260203_190000.json",
@@ -293,18 +312,23 @@ Golden output tests verify that the runtime's observable behavior has not change
 
 ```bash
 # Run golden output verification
-cargo test --test golden_outputs
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo test --test golden_outputs
 
 # First-time recording (prints checksums to stderr)
-cargo test --test golden_outputs -- --nocapture
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo test --test golden_outputs -- --nocapture
 ```
 
 ### How It Works
 
 1. Each test runs a deterministic workload with fixed inputs
-2. Outputs are hashed to a u64 checksum via `DefaultHasher`
-3. Checksums are compared against hardcoded expected values
-4. Mismatch means behavior changed — intentional changes require updating the expected values
+2. Scalar outputs are framed explicitly and hashed with SHA-256; the first 64
+   bits preserve the compact checksum display while remaining stable across
+   Rust toolchains
+3. Certified plan rewrites additionally pin full SHA-256 before/after plan
+   hashes, certificate fingerprints, semantic results, and original/rewritten
+   trace receipts
+4. Checksums and rewrite receipts are compared against reviewed expected values
+5. Mismatch means behavior changed — intentional changes require updating the expected values
 
 ### Covered Workloads
 
@@ -324,7 +348,7 @@ cargo test --test golden_outputs -- --nocapture
 
 After an intentional behavioral change:
 
-1. Run `cargo test --test golden_outputs -- --nocapture 2>&1 | grep "GOLDEN MISMATCH"`
+1. Run `rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo test --test golden_outputs -- --nocapture 2>&1 | grep "GOLDEN MISMATCH"`
 2. Verify the change is expected
 3. Set the expected value in `FIRST_RUN_SENTINEL` mode (set to `0`) to record new values
 4. Update with recorded values
@@ -395,7 +419,7 @@ Use this template when proposing a performance optimization:
 
 | Metric | Current | Target | Measurement |
 |--------|---------|--------|-------------|
-| p50 latency | X ns | Y ns | `cargo bench --bench <name>` |
+| p50 latency | X ns | Y ns | `rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo bench --features criterion-benches --bench <name>` |
 | p99 latency | X ns | Y ns | |
 | Allocations/op | X | Y | heaptrack or alloc_census |
 | Throughput | X/s | Y/s | |
@@ -502,7 +526,7 @@ Trace equivalence:
 - Schedule certificate consistency checked (if applicable)
 
 Golden outputs:
-- `cargo test --test golden_outputs` run? [yes/no]
+- `rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo test --test golden_outputs` run? [yes/no]
 - Any checksum changes? [no / yes -> list + rationale]
 
 Perf evidence:
@@ -526,7 +550,10 @@ Perf evidence:
 ./scripts/capture_baseline.sh --save baselines/
 ```
 
-Reads `target/criterion/*/new/estimates.json` and produces a single JSON with `{name, mean_ns, median_ns, std_dev_ns}` per benchmark. Baselines are saved as `baselines/baseline_<timestamp>.json` and `baselines/baseline_latest.json`.
+Reads `target/criterion/*/new/estimates.json` and produces a single JSON with
+`schema_version`, `cv_pct_flake_threshold`, `flaky_benches`, and per-benchmark
+`{name, mean_ns, median_ns, std_dev_ns, cv_pct}` fields. Baselines are saved as
+`baselines/baseline_<timestamp>.json` and `baselines/baseline_latest.json`.
 
 The baseline JSON also includes `p95_ns` and `p99_ns`, computed from `sample.json`
 as per-iteration latencies.
@@ -540,6 +567,9 @@ For multi-benchmark runs with structured artifacts, use:
 ./scripts/run_perf_e2e.sh --compare baselines/baseline_latest.json
 ./scripts/run_perf_e2e.sh --save-baseline baselines/
 ```
+
+`run_perf_e2e.sh` is also fail-closed for benchmark execution: it requires a
+working `rch` via `RCH_BIN` and keeps `--list` as the no-`rch` discovery path.
 
 Artifacts are written under `target/perf-results/` with:
 - `report.json` containing run metadata, bench exit codes, compare output, and system info
@@ -559,7 +589,7 @@ modifying code or outputs.
 ./scripts/alloc_census.sh
 
 # Explicit tool + benchmark
-./scripts/alloc_census.sh --tool valgrind --cmd "cargo bench --bench scheduler_benchmark"
+./scripts/alloc_census.sh --tool valgrind --cmd "rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo bench --features criterion-benches --bench scheduler_benchmark"
 
 # Optional flamegraph capture (requires cargo-flamegraph)
 ./scripts/alloc_census.sh --flamegraph
@@ -572,7 +602,7 @@ artifacts and summaries. Example schema:
 {
   "generated_at": "2026-02-03T03:21:00Z",
   "tool": "heaptrack",
-  "command": "cargo bench --bench phase0_baseline",
+  "command": "rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo bench --features criterion-benches --bench phase0_baseline",
   "artifacts": {
     "raw": "baselines/alloc_census/heaptrack_20260203_032100.1234.gz",
     "summary": "baselines/alloc_census/heaptrack_20260203_032100.txt",
@@ -666,9 +696,9 @@ Capacity guidance (initial sizing):
 Recommended CI workflow:
 
 ```yaml
-- cargo test --test golden_outputs  # behavioral equivalence
-- cargo bench                        # run benchmarks
-- ./scripts/capture_baseline.sh --save baselines/  # archive baseline
+- rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo test --test golden_outputs  # behavioral equivalence
+- rch exec -- env RUSTFLAGS="-C force-frame-pointers=yes" CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_benchmark_docs cargo bench --profile release-perf --features criterion-benches  # run benchmarks
+- ./scripts/capture_baseline.sh --profile release-perf --save baselines/  # archive baseline
 ```
 
 The conformance bench runner (`conformance/src/bench/`) also supports regression checking with configurable thresholds (default: 10% mean, 15% p95, 25% p99, 10% allocation count).

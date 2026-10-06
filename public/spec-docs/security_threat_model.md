@@ -1,8 +1,8 @@
 # Security Review and Threat Model
 
 Status: draft
-Last updated: 2026-02-01
-Owner: bd-2827
+Last updated: 2026-05-24
+Owner: asupersync-umelq.14.2
 
 ## Scope
 
@@ -45,6 +45,142 @@ Primary assets and goals:
 - Remote authenticated attacker: protocol misuse, request smuggling, stream abuse
 - Local attacker (same host): abuse of file paths, permissions, or local sockets
 - Malicious library user: misuse of APIs, intentional invariant violations
+
+## Browser/WASM Threat Addendum (asupersync-umelq.14.1)
+
+This addendum defines browser-specific security assumptions and controls for the
+`wasm-browser-preview` surface.
+
+### Threat Assumptions
+
+- Browser host and JavaScript environment are untrusted from the runtime point of view.
+- Network authority must be explicit (`Cx` + `IoCap`) and never ambient.
+- Fetch capability authority is default-deny; every origin/method/credential grant is explicit.
+- Replay artifacts are potentially exfiltratable unless treated as sensitive outputs.
+- Dependency compromise remains possible; policy gates must prevent forbidden runtime surfaces.
+
+### STRIDE-style Threat Matrix (Browser Scope)
+
+| Category | Browser Abuse Case | Required Control |
+| --- | --- | --- |
+| Spoofing | Untrusted origin impersonates approved backend | Default-deny origin policy + explicit origin allowlist in `FetchAuthority` |
+| Tampering | Script mutates request shape to bypass policy | Method allowlist + header-count cap + invalid URL rejection |
+| Repudiation | Missing provenance for security decisions | Structured security diagnostics + deterministic test replay commands |
+| Information Disclosure | Replay/log artifacts expose secrets/tokens | Redaction requirements + no secret-bearing stdout/stderr |
+| Denial of Service | Oversized headers/bodies or hostile request patterns | Hard policy bounds (`max_header_count`, protocol size limits) |
+| Elevation of Privilege | Ambient fetch/credentials escalation without capability | Capability-gated `IoCap::fetch_cap()` + default-deny grants (origin/method/credentials) |
+
+### Explicit Policy Checks and Adversarial Tests
+
+- `tests/security_invariants.rs` (`browser_fetch_security` module) enforces:
+  - default authority deny-all behavior,
+  - untrusted origin denial,
+  - method escalation denial,
+  - credential-default-deny behavior,
+  - header-count bound enforcement,
+  - malformed URL rejection.
+- `src/io/cap.rs` unit tests enforce authority and policy wiring through `BrowserFetchIoCap`.
+- `.github/workflows/ci.yml` runs full test gates; failures include deterministic
+  test names and replayable commands.
+
+### Deterministic Repro Commands
+
+For local reproduction with remote offload:
+
+```bash
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_security_docs cargo test --test security_invariants browser_fetch_security -- --nocapture
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_security_docs cargo test --lib io::cap -- --nocapture
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_security_docs cargo test --test security -- --nocapture
+```
+
+For CI parity checks:
+
+```bash
+python3 scripts/check_wasm_dependency_policy.py --policy .github/wasm_dependency_policy.json
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_security_docs cargo test --test security_invariants browser_fetch_security -- --nocapture
+```
+
+### Residual Risk Register (Browser Scope)
+
+| Risk | Why Residual | Current Mitigation | Closure Trigger |
+| --- | --- | --- | --- |
+| Third-party package compromise in JS toolchains | Rust-level controls cannot fully govern npm/bundler supply chain | Dependency policy gate + lockfile review + reproducible CI artifacts | Signed provenance + policy-enforced package allowlist for browser SDK distribution |
+| Replay artifact over-collection | Traces can capture sensitive operational context if emitted too broadly | Redaction guidance + scoped diagnostics + no secret stdout/stderr | Automated artifact redaction validation gate in CI |
+| Host bridge misuse by integrators | Browser embedding layer can accidentally widen authority in app code | Explicit `FetchAuthority` contract with default-deny grants (origin/method/credentials) | Contract tests for all host adapters plus policy check in release gate |
+
+## Trace/Telemetry Privacy Model (`asupersync-umelq.14.4`)
+
+Normative policy source: `.github/security_release_policy.json` section
+`trace_telemetry_privacy` (`trace-telemetry-privacy-v1`).
+
+Data minimization classes:
+- `secret`: credentials/tokens/password-like material; never persisted in replay/telemetry artifacts.
+- `sensitive`: potentially identifying payload/log details; allowed only in redacted form.
+- `metadata`: routing + reproducibility metadata (`suite`, `scenario_id`, `seed`, replay command) retained for forensics.
+
+Redaction modes and opt-in levels:
+- `metadata_only` (default): keeps deterministic reproduction metadata, strips sensitive payload fields.
+- `strict`: stronger minimization with the same replay contract guarantees.
+- `none`: local-only opt-in for debugging; forbidden in CI.
+
+Retention and storage scope:
+- Local default/max: 14 days.
+- CI default/max: 30 days.
+- Approved artifact path fragments:
+  - `/target/e2e-results/`
+  - `/target/phase6-e2e`
+  - `/target/test-results/`
+  - `/test_logs`
+
+Release-blocking privacy assertions:
+- `artifact_lifecycle_policy.json` must declare CI-safe redaction mode (`metadata_only` or `strict`).
+- Required redacted fields must include `suite_log`.
+- Retention days must be numeric and within CI cap.
+- Every suite must keep replay and artifact routing enabled.
+
+CI enforcement:
+- `.github/workflows/ci.yml` D4 gate validates lifecycle artifacts against
+  `.github/security_release_policy.json.trace_telemetry_privacy`.
+- Security release gate (`scripts/check_security_release_gate.py`) and CI report artifacts
+  provide audit evidence for incident review.
+
+## ATP Offline Mailbox Threat Addendum (`asupersync-h3ti40`)
+
+Offline ATP mailbox relays are untrusted store-and-forward infrastructure. The
+relay may enforce storage policy and prove custody, but it must not need access
+to private payload bytes. Receiver safety is based on policy metadata, stable
+digests, expiry, monotonic sequence evidence, and proof-bundle linkage.
+
+### Threat Assumptions
+
+- Relay operators can observe timing, object sizes, mailbox ids, source and
+  receiver routing metadata, quota pressure, and expiry timestamps.
+- Relay operators cannot be trusted to preserve payload confidentiality unless
+  bytes are encrypted before relay custody.
+- Authenticated peers can still attempt replay, quota exhaustion, storage spam,
+  stale retrieval, truncation, or equivocation across receivers.
+- Receivers may be offline long enough for entries to expire, so expiry and
+  non-delivery evidence must remain explicit instead of inferred from absence.
+
+### Required Controls
+
+| Risk | Required control | Code surface |
+| --- | --- | --- |
+| Private payload disclosure | Stored mailbox objects must be end-to-end encrypted before relay custody unless they carry an explicit public-data policy id. | `MailboxPrivacyPolicy::validate` |
+| Metadata leakage | Diagnostics redact peer/object identifiers and cap visible peer metadata by policy. | `MailboxPrivacyPolicy::redact_peer`, `InboxJsonRow` |
+| Quota exhaustion / spam | Mailbox entries are charged to the `Mailbox` quota bucket before acceptance and expire through mailbox retention policy. | `QuotaBucket::Mailbox`, `QuotaLedger`, `RetentionPolicy` |
+| Tampering / equivocation | Retrieval must match manifest root, stored-object digest, manifest epoch, and mailbox sequence evidence. | `MailboxTamperEvidence::validate_retrieval` |
+| Replay | Receivers reject sequence numbers at or below the last accepted mailbox sequence. | `MailboxTamperEvidence::validate_retrieval` |
+| Truncation | Receivers compare returned byte count with the committed mailbox content length. | `MailboxTamperEvidence::validate_retrieval` |
+| Stale entries | Receivers reject retrieval after the committed mailbox expiry. | `MailboxTamperEvidence::validate_retrieval` |
+
+### Residual Risk Register
+
+| Risk | Why Residual | Current Mitigation | Closure Trigger |
+| --- | --- | --- | --- |
+| Relay traffic analysis | Size/timing/routing metadata remains visible even with encrypted payloads | Metadata redaction and explicit relay-visibility documentation | Padding/batching policy with deterministic quota impact tests |
+| Non-delivery ambiguity | A receiver cannot distinguish deletion, expiry, and malicious withholding without relay evidence | Expiry is explicit and proof bundles can attach mailbox storage/retrieval evidence | Signed non-delivery receipts and independent relay quorum evidence |
+| Abuse across federated relays | A malicious sender can distribute spam across operators | Per-relay quota bucket and retention controls | Federated reputation/rate-limit protocol with replayable abuse evidence |
 
 ## Threats and Mitigations by Component
 
@@ -181,6 +317,7 @@ Gaps are listed in the "Open Items" section.
 | Network primitives hardening | `tests/net_tcp.rs`, `tests/net_udp.rs`, `tests/net_unix.rs`, `tests/net_verification.rs` | Nonblocking and error paths |
 | File system safety | `tests/fs_verification.rs`, `tests/io_cancellation.rs` | File ops + cancel behavior |
 | Security primitives | `tests/security/*.rs` | Auth/context/key/tag/property tests |
+| Browser fetch authority boundaries | `tests/security_invariants.rs` (`browser_fetch_security`), `src/io/cap.rs` (unit tests) | Origin/method/credentials/header policy enforcement |
 | Trace/replay integrity | `tests/replay_debugging.rs` | Trace format + replay sanity |
 
 ## Per-Protocol Size Limits (Current Defaults)
@@ -240,6 +377,37 @@ Missing fuzz targets to add: WebSocket frame parser and gRPC message framing.
 - Emit structured trace events for security-relevant failures
 - Record reasons for protocol errors (without leaking secrets)
 - Never write to stdout/stderr in core runtime paths
+
+## Automated Security Release Gate (`asupersync-umelq.14.5`)
+
+The security release gate validates policy compliance in CI before every release.
+
+- Policy: `.github/security_release_policy.json`
+- Gate script: `scripts/check_security_release_gate.py`
+- Report artifact: `artifacts/security_release_gate_report.json`
+- Event log: `artifacts/security_release_gate_events.ndjson`
+
+Release-blocking checks (SEC-BLOCK-01 through SEC-BLOCK-06):
+
+1. **Dependency audit**: No forbidden runtime crates in WASM profiles.
+2. **Capability authority**: FetchAuthority/StorageAuthority default-deny enforcement.
+3. **Protocol bounds**: All protocol parsers enforce documented size limits.
+4. **Telemetry redaction**: Sensitive data scrubbed before emission.
+5. **Structured concurrency**: No orphan tasks or obligation leaks.
+6. **Supply chain**: All conditional dependencies have non-expired transition plans.
+
+Warning checks (non-blocking): fuzz target coverage, credential escalation prevention.
+
+Adversarial scenarios (ADV-01 through ADV-06) are validated for test coverage against
+`tests/security_invariants.rs`.
+
+Validator commands:
+
+```bash
+python3 scripts/check_security_release_gate.py --self-test
+python3 scripts/check_security_release_gate.py \
+  --policy .github/security_release_policy.json
+```
 
 ## Open Items (bd-2827)
 

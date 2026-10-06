@@ -29,12 +29,254 @@ fn main() -> Result<(), asupersync::Error> {
 ```
 
 Notes:
-- The `scope!` macro requires the `proc-macros` feature.
+- The `scope!` macro is available in default builds; if you disable default
+  features, re-enable `proc-macros`.
 - `Cx::for_request()` is convenient for integration testing and request-style entry points.
 - Production code should receive `Cx` from runtime-managed tasks when available.
 - Use `Cx` and `Scope` for all effects: no ambient authority.
 - A region closes to quiescence: all children complete and all finalizers run.
 - Cancellation is a protocol (request -> drain -> finalize), not a silent drop.
+
+---
+
+## Tokio Migration Playbook
+
+Use the native Asupersync modules first when your stack fits the built-in
+runtime, HTTP, web, gRPC, or database surfaces. Reach for
+`asupersync-tokio-compat` only at the boundary where a dependency is hard-wired
+to Tokio or hyper runtime traits.
+
+### Migration Readiness Planner
+
+Before changing a brownfield project, run the read-only planner so the migration
+starts from an inventory, proof-pack, semantic map, and operator phase plan
+rather than from hand-maintained notes.
+
+```bash
+python3 scripts/migration_readiness_planner.py --list
+python3 scripts/migration_readiness_planner.py --dry-run --scenario tokio-http-service
+python3 scripts/migration_readiness_planner.py --execute --output-root "${TMPDIR:-/tmp}/asupersync_migration_planner_e2e"
+python3 scripts/migration_readiness_planner.py --project-root /path/to/rust/project --output-root target/migration-readiness
+```
+
+The planner never mutates the scanned project. For a real project, read these
+report fields first:
+
+- `summary.final_verdict`: `ready`, `needs_quarantine`, or `blocked`
+- `proof_pack.proof_commands`: remote-required cargo-tree checks such as
+  `default-production-tokio-tree`, `metrics-production-tokio-tree`, and
+  `fuzz-tokio-quarantine-tree`
+- `semantic_map.recommendations`: Cx threading, region ownership,
+  cancellation checkpoints, and capability narrowing work
+- `operator_report.phase_plan`: six ordered phases that map inventory rows back
+  to the migration playbook
+- `operator_report.residual_risks`: rows that still need manual design review
+
+<!-- MIGRATION-RECIPE-COMPILER:INTEGRATION-LINK -->
+
+### Migration Recipe Compiler
+
+Use `docs/migration_recipe_compiler.md` when planner findings need to become an
+agent-readable implementation checklist. The checked contract at
+`artifacts/migration_recipe_compiler_v1.json` maps Tokio, hyper, tonic, axum,
+tower, and reqwest concepts to native Asupersync modules, proof lanes, compat
+boundary policy, and no-destructive-edit rules. It is not an auto-porting
+codemod; unresolved findings stay as owner beads or residual-risk rows.
+
+Fixture recipes:
+
+| Project shape | Planner scenario | Expected report path |
+|---|---|---|
+| Already native Asupersync crate | `native-clean` | `summary.final_verdict=ready`, native proof commands, no residual risk rows |
+| Tokio HTTP service using axum/hyper/tower markers | `tokio-http-service` | `needs_quarantine`, semantic recommendations for region ownership, cancellation, and capability narrowing |
+| Mixed native code with an explicit compat boundary | `mixed-compat-boundary` | `needs_quarantine`, compat rows mapped to `compat_boundary_ok` guidance |
+| Malformed Cargo manifest | `malformed-workspace` | `blocked`, fail-closed manifest parse and inventory report reasons |
+| Optional Tokio edge or transitive lockfile path | `feature-gated-tokio-edge` | quarantine rows plus proof commands that separate default, metrics, and fuzz graphs |
+| Ambient env/fs authority plus alternate runtime | `blocked-ambient-authority-service` | `blocked`, hard-blocker classification and manual design risk rows |
+| Parseable project with no runtime evidence | `zero-evidence-empty` | `blocked`, zero-runtime-surface and zero-semantic-recommendation reasons |
+
+Use these fixtures as deterministic examples only. Real migration signoff still
+comes from running `--project-root` against the target project and keeping the
+no-Tokio production graph checks green for the core crate.
+
+Compat crate feature gates and the entrypoints they expose:
+
+| Feature | Use when | Entry points |
+|---|---|---|
+| `hyper-bridge` | Audited lower-level code needs hyper executor/timer/body traits; this is not a reqwest or tonic runtime | `hyper_bridge::AsupersyncExecutor`, `hyper_bridge::AsupersyncTimer`, `body_bridge` |
+| `tokio-io` | A crate needs Tokio `AsyncRead` / `AsyncWrite` or hyper runtime I/O traits | `io::TokioIo<T>`, `io::AsupersyncIo<T>` |
+| `tower-bridge` | You need to run tower middleware inside Asupersync or expose an Asupersync service to tower | `tower_bridge::FromTower<S>`, `tower_bridge::IntoTower<S>` |
+| `full` | You need all three bridge families together | all of the above |
+
+Rules of thumb:
+
+- Prefer native `src/web/` and `src/grpc/` when you control the application
+  surface. The compat crate is for interoperability, not for replacing
+  Asupersync's `Cx`-first model.
+- Keep `Cx` explicit across every boundary. The compat layer is designed so the
+  call site still owns region lifetime, cancellation, and capability narrowing.
+- Treat adapters as edge infrastructure. Do not add Tokio dependencies to the
+  core `asupersync` crate or to examples that are meant to show the native
+  runtime surface.
+- The compat crate does not construct or enter a Tokio runtime. A dependency
+  that calls `tokio::runtime::Handle::current()` or requires Tokio's reactor,
+  timers, or task scheduler must stay in an independently owned Tokio island.
+
+### Hyper runtime-trait components
+
+When a client or server stack expects hyper runtime traits, wire three pieces:
+an executor, a timer, and a compatible I/O wrapper.
+
+```ignore
+use asupersync_tokio_compat::hyper_bridge::{AsupersyncExecutor, AsupersyncTimer};
+use asupersync_tokio_compat::io::TokioIo;
+
+let executor = AsupersyncExecutor::with_spawn_fn(|future| {
+    // Route adapter-spawned work into the owning region.
+    let _ = future;
+});
+let timer = AsupersyncTimer::new();
+
+let asupersync_stream = /* asupersync::net::TcpStream or TLS stream */;
+let io = TokioIo::new(asupersync_stream);
+
+let builder = hyper::server::conn::http1::Builder::new().timer(timer);
+let _ = (executor, io, builder);
+```
+
+This is component wiring, not a complete client or server. It can support
+audited lower-level hyper code whose needs are limited to these traits. It does
+not make reqwest or tonic run without their required Tokio runtime context.
+
+### tower and axum-style middleware stacks
+
+Use `FromTower<S>` when you want to keep a tower middleware/service stack but
+call it from Asupersync code with an explicit `&Cx`. Use `IntoTower<S>` when an
+Asupersync service must be presented as a `tower::Service`.
+
+```ignore
+use asupersync_tokio_compat::tower_bridge::FromTower;
+
+let tower_service = tower::ServiceBuilder::new()
+    .service(my_tower_service);
+
+let bridge = FromTower::new(tower_service);
+let response = bridge.call(&cx, request).await?;
+```
+
+This is the right bridge for a Tower service whose future is independently
+runnable on the Asupersync executor. Audit middleware individually: the bridge
+does not supply a Tokio runtime to `tower-http`, axum, or any other layer that
+needs one. When migrating axum, keep the still-Tokio-dependent portion in an
+owned Tokio island or move handlers and request state to Asupersync's native web
+surface.
+
+### Asupersync Cx polling-context and I/O shims
+
+Some compatibility futures need Asupersync's current `Cx` while they are polled,
+and some libraries need only Tokio I/O traits. Those are separate needs.
+
+```ignore
+use asupersync_tokio_compat::runtime::with_tokio_context;
+
+let result = with_tokio_context(&cx, || async {
+    runtime_independent_compat_future.await
+}).await;
+```
+
+`with_tokio_context` and `AsupersyncRuntime::new(&cx).enter(...)` keep `Cx`
+installed while the wrapped code runs. They do not install a Tokio runtime and
+do not make `tokio::runtime::Handle::current()` available. The I/O adapters let
+you translate compatible stream traits in either direction:
+
+- `TokioIo<T>`: Asupersync stream -> Tokio/hyper traits
+- `AsupersyncIo<T>`: Tokio stream -> Asupersync traits
+
+Use the narrowest bridge that satisfies the dependency. If a library only needs
+I/O trait compatibility, do not also bring in the hyper or tower bridges.
+
+### Suggested migration order
+
+1. Replace top-level `tokio::spawn`, timers, and channels with native
+   Asupersync equivalents in your application code.
+2. Keep third-party Tokio-runtime-dependent crates and their independently
+   owned Tokio runtime behind one explicit island boundary.
+3. Migrate HTTP/web/gRPC surfaces to native Asupersync modules when practical,
+   leaving only truly external crates on the compat path.
+4. Re-run the no-Tokio production graph checks on the core crate once the
+   boundary is in place:
+
+```bash
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_docs cargo tree -e normal -p asupersync -i tokio
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_docs cargo tree -e normal -p asupersync --features metrics -i tokio
+```
+
+These commands should still print `warning: nothing to print.` The compat crate
+is an opt-in satellite, not part of the default production graph.
+
+---
+
+## Wave2 Capability Smoke Recipes
+
+These recipes are the public entry points for the promoted Wave2 capability
+evidence lanes. They are intentionally small: each row names the capability, the
+host context, the proof command, and the evidence artifact to inspect after the
+command. Cargo-backed checks must run through `rch exec`; broker or browser
+lanes must emit deterministic skip rows when their host prerequisites are not
+available.
+
+| Capability | Host context | Smoke command | Evidence |
+|---|---|---|---|
+| Remote transport lifecycle | remote worker | `bash scripts/run_remote_transport_lifecycle_evidence.sh --output-root ${TMPDIR:-/tmp}/wave2_remote_transport_examples` | `artifacts/wave2/remote_transport_lifecycle_evidence.json` |
+| gRPC deadline + health conformance | native deterministic conformance | `bash scripts/run_grpc_deadline_health_conformance_evidence.sh --output-root ${TMPDIR:-/tmp}/wave2_grpc_examples` | `artifacts/wave2/conformance_grpc_deadline_health_evidence.json` |
+| Actor mailbox + trace-event conformance | native deterministic conformance | `bash scripts/run_actor_trace_conformance_evidence.sh --output-root ${TMPDIR:-/tmp}/wave2_actor_trace_examples` | `artifacts/wave2/conformance_actor_mailbox_trace_event_evidence.json` |
+| Massive-swarm capacity envelope | operator profile / large-host planning | `bash scripts/run_massive_swarm_capacity_envelope.sh --output-root ${TMPDIR:-/tmp}/wave2_capacity_examples` | `artifacts/wave2/massive_swarm_capacity_envelope_evidence.json` |
+| Operator swarm profile diagnostics | operator diagnostics | `bash scripts/run_operator_swarm_profile_diagnostics.sh --output-root ${TMPDIR:-/tmp}/wave2_operator_examples` | `artifacts/wave2/operator_swarm_profile_diagnostics_evidence.json` |
+
+Recipe rules:
+
+- Keep `Cx` flow, region ownership, cancellation/drain/finalize, and no-ambient-runtime boundaries visible in any Rust example promoted from these recipes.
+- Do not convert evidence artifacts into decorative demos; a row is public only when the command and artifact form a reproducible adoption path.
+- Do not add Tokio, hyper, axum, reqwest, async-std, or smol dependencies to core runtime examples.
+- If a capability is platform, broker, or formal-tooling gated, keep a stable `unsupported_reason`, fallback target, owner bead, and deterministic log row instead of silently skipping it.
+
+The inventory and fail-closed contract for these recipes live in
+`artifacts/wave2/capability_examples_smoke_recipes_evidence.json` and
+`tests/wave2_capability_examples_contract.rs`.
+
+## Wave2 Support-Matrix Reconciliation
+
+The Wave2 docs support matrix is downstream of machine-checkable source
+evidence, not tracker status. The canonical registry is
+`artifacts/wave2_capability_evidence_registry_v1.json`; public docs reconcile
+against that registry plus the lane-specific artifacts before a support class is
+promoted.
+
+Public support-class vocabulary used by the docs matrix:
+
+| Support class | Meaning |
+|---|---|
+| `shipped` | Source, artifact, and command proof support the public claim without a feature-gate caveat |
+| `feature-gated` | Shipped only when the named Cargo feature or host gate is enabled |
+| `preview` | Public but explicitly not a stable blanket support promise |
+| `lab/virtual-backed` | Proven through deterministic lab or virtual runtime evidence |
+| `substrate-only` | Internal or lower-level substrate exists, but no public runtime lane is promoted |
+| `broker/coordinator-only` | Host can coordinate bounded work but must not own a direct Browser Edition runtime |
+| `deferred` | Tracked and intentionally not promoted yet |
+| `unsupported` | The platform or runtime contract rules out the claim |
+| `platform-scoped` | Support depends on an explicit OS, browser, or host prerequisite |
+
+Reconciliation proof lives in
+`artifacts/wave2/docs_support_matrix_reconciliation_evidence.json`,
+`scripts/run_wave2_docs_support_matrix_reconciliation.sh`, and
+`tests/wave2_docs_support_matrix_reconciliation_contract.rs`. The proof checks
+README, Browser Edition docs, integration docs, formal proof posture, QPACK
+support posture, conformance evidence, capability examples, and the Wave2
+registry together so promoted rows have public markers and non-promoted rows
+keep an explicit fallback, owner, residual risk, or unsupported reason.
+The Wave2 signoff proof pack is represented by
+`artifacts/wave2/wave2_signoff_proof_pack_evidence.json` and closes the
+capability-completion proof-pack marker for promoted registry rows.
 
 ---
 
@@ -145,12 +387,434 @@ Override via `RuntimeBuilder::obligation_leak_response(...)` or
 - gRPC: `src/grpc/` (framing, client/server, interceptors)
   - Tests: `tests/grpc_verification.rs`
 - WebSocket: `src/net/websocket/` (handshake, frames, client/server)
-  - Tests: `tests/e2e_websocket.rs`
+  - Conformance tests: `tests/conformance/mod.rs` wires
+    `websocket_extension_negotiation_rfc6455` and the directory-backed
+    `websocket_rfc6455` suite for framing, masking, control-frame, close,
+    error-handling, extension, and fragmentation coverage.
+  - Runtime/e2e tests: `tests/e2e_websocket.rs` and `tests/e2e/websocket/`
+  - Production HTTP/1 router/listener bridge:
+
+    ```rust,ignore
+    let router = Router::new().route(
+        "/ws",
+        get(FnHandler1::<_, WebSocketUpgrade>::new(
+            |upgrade: WebSocketUpgrade| {
+                upgrade
+                    .allow_origins(["https://app.example.com"])
+                    .on_upgrade(|cx, mut websocket| async move {
+                        while let Ok(Some(message)) = websocket.recv(&cx).await {
+                            if websocket.send(&cx, message).await.is_err() {
+                                break;
+                            }
+                        }
+                    })
+            },
+        )),
+    );
+    let listener = Http1Listener::bind_upgradeable(
+        "127.0.0.1:8080",
+        router.into_http1_handler(),
+    ).await?;
+    let stats = listener.run(&runtime_handle).await?;
+    ```
+
+    `on_upgrade` is a request-scoped, one-shot ownership transfer. The listener
+    validates and completely flushes the final `101`, then seeds any HTTP-codec
+    read-ahead into the WebSocket decoder and runs the callback inline under the
+    connection guard. Graceful drain cancels the callback `Cx`; force-close
+    drops the callback and socket. Bare `101` responses close after flush but
+    never transfer ownership, and a registered callback whose response is
+    later mutated fails closed with `500`. The bridge is native HTTP/1 only;
+    selected extensions currently return `501` rather than falsely negotiating
+    `permessage-deflate`, and this path makes no HTTP/2 extended-CONNECT or
+    automatic keepalive claim.
+- HTTP/3: `src/http/h3_native.rs` (native frame/settings/control-stream and
+  QPACK field-section primitives)
+  - Default support is default static-only QPACK.
+  - The opt-in dynamic QPACK field-section/table support is exposed through
+    `H3QpackMode::DynamicTableAllowed` and `QpackContext`.
+  - The opt-in dynamic QPACK instruction-stream state machine is exposed
+    through `QpackInstructionStreamState`: callers register remote QPACK
+    encoder/decoder unidirectional streams explicitly, feed instruction bytes
+    outside HTTP/3 frame parsing, and use the bounded blocked-stream scheduler
+    tied to `SETTINGS_QPACK_BLOCKED_STREAMS`.
+  - QPACK string literals support Huffman encode/decode through the shared
+    HPACK Huffman implementation.
+  - QPACK encoder/decoder unidirectional stream types still reject HTTP/3 frame
+    mapping; instruction processing is available only through the explicit
+    QPACK instruction-stream API. This is not a claim of h3/quinn drop-in parity,
+    default dynamic QPACK, or full QUIC deployment parity.
+  - Support matrix: `artifacts/http3_qpack_support_matrix_v1.json`
+- Web framework: `src/web/` (router, extractors, middleware, request-region
+  wrappers, static files, sessions/cookies, security helpers, and SSE response
+  formatting)
+  - The current wave2 proof lane is `tests/e2e_web.rs`, including route/path
+    extraction, middleware short-circuiting, panic recovery plus security
+    headers, bounded SSE batch response formatting, and request-region panic
+    isolation.
+  - `Sse` currently serializes a finite list of events into one bounded
+    `text/event-stream` body. It is useful for small finite event responses, but
+    it is not long-lived streaming SSE and does not yet model client disconnect
+    or producer backpressure through a request-region-owned stream.
+  - True streaming SSE is tracked by `asupersync-o74l7u.1`. Until that bead is
+    implemented and proven, docs and support matrices must distinguish finite
+    bounded SSE batch responses from request-region-owned streaming SSE.
 
 ### Testing reference
 
 See `TESTING.md` for test categories, logging conventions, conformance suite usage,
 and fuzzing instructions.
+
+### wasm32 Guardrails
+
+Browser-targeted compilation is explicitly gated to prevent accidental partial
+builds with semantic holes:
+
+- `target_arch = "wasm32"` requires exactly one canonical browser profile:
+  - `wasm-browser-minimal`
+  - `wasm-browser-dev`
+  - `wasm-browser-prod`
+  - `wasm-browser-deterministic`
+- The following features are compile-time rejected on wasm32:
+  - `cli`
+  - `io-uring`
+  - `tls`
+  - `tls-native-roots`
+  - `tls-webpki-roots`
+  - `sqlite`
+  - `postgres`
+  - `mysql`
+  - `kafka`
+
+Profile composition rules:
+
+- `wasm-browser-minimal` = `wasm-runtime` only (ABI/contract validation lane)
+- `wasm-browser-dev` = `wasm-runtime + browser-io`
+- `wasm-browser-prod` = `wasm-runtime + browser-io`
+- `wasm-browser-deterministic` = `wasm-runtime + deterministic-mode + browser-trace`
+- `native-runtime` is forbidden on wasm32 browser builds
+
+Policy and deterministic dependency-audit profiles are documented in
+`docs/wasm_dependency_audit_policy.md`.
+
+Optimization-variant policy (`dev`/`canary`/`release`) is defined in
+`.github/wasm_optimization_policy.json` and validated by
+`scripts/check_wasm_optimization_policy.py`, which emits
+`artifacts/wasm_optimization_pipeline_summary.json` for downstream perf/reliability
+gates.
+
+### WASM Workspace Slicing Matrix (WASM-02 / `asupersync-umelq.3.4`)
+
+This matrix is the canonical slicing contract for browser compilation closure.
+It defines what stays in the wasm browser core path vs what remains optional or
+native-only.
+
+| Slice | Browser status | Surface |
+|---|---|---|
+| Semantic core (required) | always-on in browser profiles | `types`, `record`, `cx`, `cancel`, `obligation`, `combinator`, `runtime` scheduler/cancellation core, `trace` core schema |
+| Browser capability/runtime adapters | on for browser profiles that include I/O | `runtime::reactor::browser`, browser-facing I/O/time seams, wasm ABI boundary types |
+| Deterministic diagnostics overlay | only in deterministic profile | `browser-trace`, deterministic replay-oriented trace hooks and artifact surfaces |
+| Feature-gated optional adapters | off by default in browser profiles | `proc-macros`, `metrics`, `tracing-integration`, `tower`, `trace-compression`, `config-file`, `lock-metrics` |
+| Native-only deferred slice | excluded from wasm32 builds | `fs`, `grpc`, `messaging`, `process`, `server`, `signal`, plus `tls`/`database`/`kafka` feature families |
+
+Extraction and optionalization rules:
+
+1. If a module requires native OS primitives (`libc`, `nix`, sockets, process/signal),
+   it must stay behind `cfg(not(target_arch = "wasm32"))`.
+2. Browser profiles must compile without enabling any deferred native surface.
+3. New browser-path code must route effects through explicit capability seams; no
+   ambient host access.
+4. Changes to this matrix must be reflected in `Cargo.toml` feature closure and
+   in `src/lib.rs` compile-time guardrails.
+
+Deterministic validation bundle for this matrix:
+
+```bash
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_wasm_docs cargo check --target wasm32-unknown-unknown \
+  --no-default-features --features wasm-browser-minimal
+
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_wasm_docs cargo check --target wasm32-unknown-unknown \
+  --no-default-features --features wasm-browser-dev
+
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_wasm_docs cargo check --target wasm32-unknown-unknown \
+  --no-default-features --features wasm-browser-deterministic
+```
+
+Expected outcomes:
+
+- each profile compiles in isolation,
+- selecting multiple canonical profiles fails at compile time,
+- native-only modules remain excluded from wasm32 closure.
+
+### Browser Edition Documentation IA (WASM-15 / `asupersync-umelq.16.1`)
+
+This section is the canonical information architecture and navigation contract
+for Browser Edition docs. Downstream docs beads (`16.2`, `16.3`, `16.4`, `16.5`)
+should extend this structure instead of inventing parallel navigation trees.
+
+Primary user journeys:
+
+1. First-use onboarding: install -> run a minimal browser workflow -> verify deterministic behavior.
+2. Framework adoption: integrate into React/Next flows without breaking ownership/cancellation semantics.
+3. Incident response: capture trace -> replay deterministically -> map findings to mitigation.
+4. Security/perf hardening: verify authority boundaries, redaction posture, and budget thresholds.
+
+Navigation top-level (required):
+
+| Lane | Reader intent | Required doc surfaces | Exit criteria |
+|---|---|---|---|
+| `Concepts` | Understand guarantees and constraints before coding | Browser semantic contract, invariants, capability model, deferred-surface register | Reader can explain what is in-scope vs deferred and why |
+| `Quickstart` | Get working minimal app fast | Install/profile selection, minimal code path, deterministic smoke validation | Reader can run one successful browser flow and verify expected output |
+| `API + Profiles` | Choose correct runtime/profile/capability envelope | Feature profile matrix, capability wrappers, ABI/ownership boundaries | Reader can select a profile and avoid forbidden surfaces |
+| `Framework Guides` | Implement in React/Next/vanilla | Framework-specific bootstrap + lifecycle + cancellation guidance | Reader can integrate without semantic violations |
+| `Replay + Diagnostics` | Debug failures with deterministic evidence | Trace schema, replay workflow, artifact commands, failure taxonomy | Reader can reproduce a failure from provided artifacts |
+| `Security + Performance` | Validate production-readiness gates | Threat model, policy checks, budgets, CI gates, waiver/escalation rules | Reader can execute gate checks and interpret failures |
+| `Troubleshooting` | Recover from known failure patterns | Symptom -> cause -> command -> expected evidence mapping | Reader can resolve common failures without ad-hoc guesswork |
+
+### Browser Runtime Support Boundary (DX Contract)
+
+Browser Edition is **direct-runtime** only where the shipped package guards and
+validation evidence explicitly say it is supported. All other environments are
+**bridge-only** or out of scope; there is no automatic fallback from an
+unsupported runtime into a partially functional direct-execution mode.
+
+Support posture:
+
+- direct runtime today: browser main thread with a real `window` +
+  `document` environment and `WebAssembly` support, plus dedicated workers
+  with `DedicatedWorkerGlobalScope` and `WebAssembly`
+- bridge-only: Next.js server components, route handlers, edge runtimes, and
+  other server-side render environments
+- currently unsupported for direct runtime: Node.js-only contexts,
+  service-worker browser contexts classified as broker/coordinator-only, and
+  shared-worker browser contexts classified as broker/coordinator-only
+- non-goals for browser runtime closure: native-only modules (`fs`, `process`,
+  `signal`, `server`), native DB clients, and native transport surfaces
+
+Documentation updates for Browser Edition should keep this boundary explicit and
+must not imply automatic fallback from unsupported runtimes into partially
+functional direct execution.
+
+### Browser Support-Class Quick Reference
+
+Use this table before debugging a Browser Edition report. The first question is
+not "which package failed?" but "what support class does this runtime or
+capability belong to right now?"
+
+| Support class | What it means | Typical examples in the live tree | First operator action | Canonical reference |
+|---|---|---|---|---|
+| Direct-runtime supported | Shipped, package-guarded, and covered by Browser Edition evidence lanes | browser main thread, dedicated worker, React client tree, Next client component | keep runtime creation inside that browser boundary and debug the specific failing capability | `docs/WASM.md`, matrix below |
+| Guarded direct-runtime support | Shipped only when explicit host or deployment prerequisites hold | `WebTransport` datagrams, browser-main-thread-only download helpers, `localStorage` substrate | check the prerequisite/denial reason first, then fall back to the documented safe lane instead of widening the support claim | `docs/WASM.md`, `docs/wasm_troubleshooting_compendium.md` |
+| Guarded public browser boundary | Shipped public `@asupersync/browser` helpers over same-browser host APIs; not a new direct-runtime host lane | browser-native `MessageChannel` / `MessagePort` / `BroadcastChannel` helpers; WHATWG `ReadableStream` / `WritableStream` byte helpers | require the explicit browser-native capability token, inspect stable reason/error codes, and fall back to serialized app-boundary handoff when denied | `docs/WASM.md`, `artifacts/wave2/browser_native_message_and_stream_apis_evidence.json` |
+| Broker/coordinator-only | The host may coordinate bounded work and durable handoff, but must not own a direct Browser Edition runtime | service-worker bounded broker registration and durable handoff; shared-worker bounded coordinator attach/detach/fallback | keep runtime creation out of service/shared-worker hosts; use the broker/coordinator helpers only for scoped registration, restartable work descriptors, per-client attach, detach cleanup, and handoff evidence | `docs/WASM.md`, `docs/wasm_service_worker_broker_contract.md`, `docs/wasm_shared_worker_tenancy_lifecycle_contract.md` |
+| Direct-runtime feasible but not yet shipped | Real substrate exists, but there is no promoted public Browser Edition API/contract yet | Rust `AsyncRead` / `AsyncWrite` browser-core stream ABI | do not present it as public JS/TS SDK support; keep it on repo-internal validation lanes until promotion closes | `docs/WASM.md` |
+| Bridge-only | Direct Browser Edition runtime execution is not allowed at that boundary; use serialization or an adapter seam instead | React SSR, Next server components, Next route handlers, Next edge runtime | move runtime creation back into a browser-owned boundary and cross the server/edge hop with serializable data only | matrix below, `docs/wasm_troubleshooting_compendium.md` |
+| Impossible / unsupported | The browser security model or shipped package contract rules out direct Browser Edition runtime support | Node-only direct runtime, raw TCP/UDP, filesystem, process/signal, native DB clients | switch to native `asupersync` or an explicit bridge; do not add fake parity shims | `docs/WASM.md` |
+
+The checked Browser Edition readiness matrix is
+`artifacts/browser_edition_readiness_matrix_v1.json`, with the human review
+table in `docs/browser_edition_readiness_matrix.md`. It extends the quick
+reference above with Package ABI boundary, vanilla/Vite, Webpack, fixture,
+rollback, freshness, and no-claim rows for release review.
+
+### Browser-Native Messaging And Stream Helper Contract
+
+The promoted browser-native support class is
+`guarded-public-browser-boundary`. The public `@asupersync/browser` package
+exports `detectBrowserNativeMessagingSupport()`,
+`assertBrowserNativeMessagingSupport()`, `createBrowserMessageChannel()`,
+`createBrowserMessagePort()`, `createBrowserBroadcastChannel()`,
+`detectBrowserNativeStreamSupport()`, `assertBrowserNativeStreamSupport()`,
+`createBrowserReadableStream()`, and `createBrowserWritableStream()`.
+
+Messaging construction requires an explicit
+`BrowserNativeMessagingCapability`; stream construction requires an explicit
+`BrowserNativeStreamCapability`. Denials are intentionally stable:
+`capability_not_granted`, `degraded_mode_denied`,
+`ASUPERSYNC_BROWSER_NATIVE_MESSAGING_UNSUPPORTED`,
+`ASUPERSYNC_BROWSER_NATIVE_MESSAGING_OPERATION_FAILED`,
+`ASUPERSYNC_BROWSER_NATIVE_STREAM_UNSUPPORTED`, and
+`ASUPERSYNC_BROWSER_NATIVE_STREAM_OPERATION_FAILED` are the operator-facing
+markers. The proof artifact is
+`artifacts/wave2/browser_native_message_and_stream_apis_evidence.json`, and the
+maintained runner is `scripts/run_browser_native_message_stream_evidence.sh`.
+
+These helpers are same-browser application-boundary wrappers. They do not imply
+raw TCP/UDP/filesystem/process support, cross-origin federation,
+service-worker or shared-worker direct-runtime support, or a public Rust
+`AsyncRead` / `AsyncWrite` browser-core wasm ABI.
+
+### Browser Environment Support Matrix
+
+This matrix is the current shipped support posture for the JS/TS packages, not
+an aspirational roadmap.
+
+| Environment | Current posture | Direct runtime allowed | Canonical package surface | Shipped diagnostic contract | Required action |
+|---|---|---|---|---|---|
+| Browser main thread (`window` + `document` + `WebAssembly`) | supported | yes | `@asupersync/browser`, `@asupersync/react`, `@asupersync/next` client target | `reason = "supported"` | create runtime/scope handles here |
+| Browser dedicated worker (`DedicatedWorkerGlobalScope` + `WebAssembly`) | supported | yes | `@asupersync/browser` | `reason = "supported"` | create runtime/scope handles inside a dedicated-worker bootstrap module |
+| Browser service worker | broker/coordinator-only; direct runtime unsupported, bounded broker/handoff supported | no | `@asupersync/browser` service-worker broker helpers | `@asupersync/browser` reports `reason = "service_worker_not_yet_shipped"` and the Rust-side ladder maps the host to `service_worker_direct_runtime_not_shipped`; the package-level broker helpers expose `detectBrowserServiceWorkerBrokerSupport()` and `BrowserServiceWorkerBrokerStore` without widening that claim | keep runtime creation out of the service worker; use `registerBroker()`, `persistBrokerWork()`, and `persistDurableHandoff()` only for bounded broker registration/handoff per `docs/wasm_service_worker_broker_contract.md`, and validate the maintained browser-run fixture with `scripts/validate_service_worker_broker_consumer.sh` |
+| Browser shared worker | broker/coordinator-only; direct runtime unsupported, bounded coordinator attach/detach/fallback supported | no | `@asupersync/browser` shared-worker coordinator helpers | Rust-side execution-ladder diagnostics pin `shared_worker_direct_runtime_not_shipped`; the JS/TS package still rejects the host for direct runtime, while the package-level helpers expose `detectBrowserSharedWorkerCoordinatorSupport()` and `createBrowserSharedWorkerCoordinatorSelection()` without widening that claim | keep runtime creation out of the shared-worker host itself; use the bounded coordinator attach/handshake/fallback helper from browser main-thread or dedicated-worker callers per `docs/wasm_shared_worker_tenancy_lifecycle_contract.md`, and validate the maintained browser-run fixture with `scripts/validate_shared_worker_consumer.sh` |
+| React client-rendered tree in a browser | supported | yes | `@asupersync/react` | `assertReactRuntimeSupport()` returns success only when browser prerequisites are present | import and create runtime from client-rendered components only |
+| React SSR / Node render path | bridge-only | no | `@asupersync/react` bridge-only usage only | `REACT_UNSUPPORTED_RUNTIME_CODE` with browser-derived reason/guidance | move runtime creation to the client tree and keep SSR on serialized data/bridge boundaries |
+| Next.js client component | supported | yes | `@asupersync/next` with `target = "client"` | `assertNextRuntimeSupport("client")` succeeds only when browser prerequisites are present | import from client components only |
+| Next.js server component / route handler | bridge-only | no | `@asupersync/next` bridge-only adapters | `NEXT_UNSUPPORTED_RUNTIME_CODE` with message `Direct Browser Edition runtime execution is unsupported in Next server runtimes.` | move runtime creation into a client component or browser-only module |
+| Next.js edge runtime | bridge-only | no | `@asupersync/next` bridge-only adapters | `NEXT_UNSUPPORTED_RUNTIME_CODE` with `target = "edge"` | keep edge code on bridge-only adapters and do not call direct runtime APIs |
+| Node.js CLI / tests / serverless code without DOM globals | unsupported for Browser Edition direct runtime | no | use native `asupersync` or explicit bridge code instead | browser/react guards surface `missing_global_this` or `unsupported_runtime_context` | switch to the native runtime lane or move Browser Edition code behind a browser-only entrypoint |
+
+### Rust-Authored Browser Consumer Lane
+
+The JS/TS packages are the shipped Browser Edition product. The Rust-authored
+lane is narrower and should be treated as three separate workflows:
+
+| Goal | Supported today | Canonical command / artifact | Evidence |
+|---|---|---|---|
+| Verify browser-safe semantic-core closure | Yes | `rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_wasm_docs cargo check --target wasm32-unknown-unknown --no-default-features --features wasm-browser-<profile>` | root `Cargo.toml`, `src/lib.rs`, `tests/wasm_browser_feasibility_matrix.rs` |
+| Maintain the Rust-side ABI/package boundary that feeds the JS/TS packages | Yes, for workspace contributors | `rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_wasm_docs cargo check -p asupersync-browser-core --target wasm32-unknown-unknown --no-default-features --features dev`; touch `asupersync-wasm` only when you need to keep the retained scaffold honest | `asupersync-browser-core/` (canonical owner), `asupersync-wasm/` (retained non-canonical scaffold) |
+| Use the maintained browser-facing Rust example the repository proves end-to-end | Yes, as an in-repo fixture workflow | `PATH=/usr/bin:$PATH bash scripts/validate_rust_browser_consumer.sh` | `tests/fixtures/rust-browser-consumer/`, `tests/wasm_rust_browser_example_contract.rs` |
+| Construct Browser Edition runtimes directly from external Rust consumer code | Preview public lane | `RuntimeBuilder::browser()` for truthful lane negotiation and structured fail-closed diagnostics | `src/runtime/builder.rs`, `tests/fixtures/rust-browser-consumer/`, `tests/wasm_browser_feasibility_matrix.rs` |
+
+Rules:
+
+- Do not present `asupersync-browser-core` or `asupersync-wasm` as the public
+  end-user Browser Edition SDK for Rust consumers.
+- Treat `asupersync-browser-core` as the canonical owner of the shipped
+  JS/WASM boundary and `asupersync-wasm` as retained non-canonical scaffold
+  rather than a second live boundary.
+- Do not imply external Rust `RuntimeBuilder` parity on `wasm32`; the public Rust browser lane is still a preview dispatcher-backed surface.
+- `asupersync-j1xbon.4` refreshes that decision explicitly: the lane remains
+  artifact-contract-backed preview, not stable external Rust Browser Edition
+  API parity.
+- If you need a shipped application-facing browser product surface today, start
+  from `@asupersync/browser`, `@asupersync/react`, or `@asupersync/next`.
+- If you need the truthful current Rust-authored workflow, use the maintained
+  fixture and validation script rather than inventing a broader support claim.
+- If you are debugging the preview Rust builder lane, inspect
+  `selected_lane`, `host_role`, `reason_code`, `preferred_lane`, and
+  `downgrade_order` before widening any support claim.
+
+### Runtime Capability Requirements and Compatibility Guidance
+
+Hard prerequisites enforced today by `detectBrowserRuntimeSupport(...)`:
+
+- browser-like `globalThis`
+- either `window` + `document` or a `DedicatedWorkerGlobalScope`
+- `WebAssembly`
+
+Capability snapshot fields emitted alongside unsupported-runtime diagnostics:
+
+- `hasAbortController`
+- `hasDocument`
+- `hasFetch`
+- `hasWebAssembly`
+- `hasWebSocket`
+- `hasWindow`
+
+`AbortController`, `fetch`, and `WebSocket` are not currently hard gates for
+basic runtime creation, but they are surfaced intentionally so feature-specific
+failures can be explained without guesswork.
+
+Shipped unsupported-runtime error contract:
+
+| Package | Error code | Typical unsupported trigger | Correct fallback |
+|---|---|---|---|
+| `@asupersync/browser` | `ASUPERSYNC_BROWSER_UNSUPPORTED_RUNTIME` | missing `globalThis`, a supported browser host (`window`/`document` or dedicated worker), or `WebAssembly` | load the package from a browser main-thread entrypoint, a dedicated worker bootstrap module, or use a server/client bridge |
+| `@asupersync/react` | `ASUPERSYNC_REACT_UNSUPPORTED_RUNTIME` | SSR or React usage outside a client-rendered browser tree | keep direct runtime creation inside the client tree |
+| `@asupersync/next` | `ASUPERSYNC_NEXT_UNSUPPORTED_RUNTIME` | `target = "server"` / `target = "edge"` or missing browser prerequisites in client code | move runtime creation into a client component and keep server/edge code bridge-only |
+
+Package-selection guidance:
+
+- Use `@asupersync/browser` for browser-only modules that directly manage
+  runtime, region, task, fetch, or websocket handles.
+- Use `@asupersync/react` only inside client-rendered React trees; do not
+  initialize Browser Edition during SSR.
+- Use `@asupersync/next` only from client components for direct runtime
+  behavior; server and edge code should exchange serializable data with a
+  browser-owned runtime rather than carrying live handles across the boundary.
+
+Non-goals and fail-closed guardrails:
+
+- no automatic downgrade from unsupported server/edge/node contexts into hidden
+  partial direct execution
+- no transfer of live browser runtime handles (`BrowserRuntime`, region/task
+  handles, cancellation tokens) across client/server boundaries
+- no claim that service/shared-worker direct runtime or guarded parallel
+  worker lanes are supported before their host contracts, package diagnostics,
+  and validation lanes are promoted together
+- no support promise for native-only modules or native database/transport
+  surfaces in Browser Edition
+- no documentation that suggests `@asupersync/next` server or edge code can
+  safely call direct Browser Edition runtime constructors
+
+### Troubleshooting Handoff By Support Class
+
+Once you classify the failing surface, keep the recovery path aligned with that
+class:
+
+| If the surface is... | Do this next | Do not do this |
+|---|---|---|
+| Direct-runtime supported | stay in the current browser boundary, capture the emitted diagnostics, and follow the matching recipe in `docs/wasm_troubleshooting_compendium.md` | do not move runtime creation across boundaries just because one capability failed |
+| Guarded direct-runtime support | verify the missing prerequisite or denial reason, then use the documented fallback (`WebSocket`, `fetch`, export handoff, etc.) | do not rewrite docs or package claims to make the guarded lane sound ambient |
+| Guarded public browser boundary | require the matching `BrowserNativeMessagingCapability` or `BrowserNativeStreamCapability`, check `capability_not_granted` / `degraded_mode_denied` / `ASUPERSYNC_BROWSER_NATIVE_*` diagnostics, and fall back to serialized app-boundary handoff | do not treat same-browser helper wrappers as raw transports, cross-origin federation, process/filesystem access, service/shared-worker direct runtime, or Rust `AsyncRead` / `AsyncWrite` wasm ABI support |
+| Direct-runtime feasible but not yet shipped | keep the behavior on a repo-internal fixture, app-boundary adapter, or explicit experimental lane until the public contract is promoted | do not present substrate existence as shipped SDK support |
+| Bridge-only | move direct runtime creation into a browser main-thread or dedicated-worker entrypoint and keep the server/edge hop serialized | do not tunnel live Browser Edition handles across client/server boundaries |
+| Impossible / unsupported | change runtime lane entirely: native `asupersync`, server-side bridge, or another explicit non-browser path | do not add hidden partial-runtime fallbacks or pretend the browser package can emulate native surfaces |
+
+Browser Edition doc map (current canonical locations):
+
+1. Concepts and architecture:
+   - `PLAN_TO_BUILD_ASUPERSYNC_IN_WASM_FOR_USE_IN_BROWSERS.md`
+   - `docs/wasm_api_surface_census.md`
+2. Dependency/profile policy:
+   - `docs/wasm_dependency_audit.md`
+   - `docs/wasm_dependency_audit_policy.md`
+3. Scheduler/time/cancellation semantics:
+   - `docs/wasm_browser_scheduler_semantics.md`
+   - `docs/wasm_cancellation_state_machine.md`
+4. Security and hardening:
+   - `docs/security_threat_model.md`
+5. This integration guide:
+   - `docs/integration.md` (entrypoint index + integration orientation)
+6. Canonical framework examples:
+   - `docs/wasm_canonical_examples.md`
+7. Troubleshooting and diagnostics cookbook:
+   - `docs/wasm_troubleshooting_compendium.md`
+   - `docs/wasm_dx_error_taxonomy.md`
+8. Rationale index and decision ledger:
+   - `docs/wasm_rationale_index.md`
+9. Pilot triage and roadmap assimilation:
+   - `docs/wasm_pilot_feedback_triage_loop.md`
+10. Browser quality evidence matrix contract:
+   - `docs/wasm_evidence_matrix_contract.md`
+
+Doc-drift verification hooks (required for Browser Edition doc changes):
+
+1. Link integrity check:
+   - ensure every Browser Edition section references at least one concrete artifact/test command.
+2. Invariant coverage check:
+   - docs must explicitly mention ownership/cancellation/obligation/quiescence impacts where relevant.
+3. Profile closure check:
+   - docs must not advertise forbidden wasm32 surfaces as supported.
+4. Repro command check:
+   - each troubleshooting or diagnostics flow must include a deterministic command path.
+5. Diagnostic parity check:
+   - unsupported-runtime guidance must reference shipped package error codes or support reasons, not invented terminology.
+
+Recommended command bundle for doc validation workflows:
+
+```bash
+# Validate rust docs/test snippets and compile surfaces
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_docs cargo check --all-targets
+
+# Enforce lint quality on touched code/doc-adjacent surfaces
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_docs cargo clippy --all-targets -- -D warnings
+
+# Validate formatting contract
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_docs cargo fmt --check
+
+# Verify shipped browser package diagnostics and guidance strings
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_docs cargo test --test wasm_js_exports_coverage_contract -- --nocapture
+```
 
 ### Examples
 
@@ -160,6 +824,7 @@ Examples live in `examples/` and cover:
 - Cancellation injection: `examples/cancellation_injection.rs`
 - Chaos testing: `examples/chaos_testing.rs`
 - Metrics dashboards: `examples/prometheus_metrics.rs`, `examples/grafana_dashboard.json`
+- Browser canonical examples + replay commands: `docs/wasm_canonical_examples.md`
 
 ### Module dependency sketch (high level)
 
@@ -184,7 +849,7 @@ raptorq
 
 ```
 Cx::scope or scope! macro
-    -> Scope::spawn (wired through runtime state)
+    -> Cx::spawn / Cx::spawn_in (runtime-wired) or Scope::spawn_registered (boot path)
         -> Runtime scheduler
             -> Task polls
                 -> cx.checkpoint() (cancellation observation)
@@ -246,6 +911,10 @@ Key knobs by component:
   - `path_timeout`, `quorum_timeout`
 - `SecurityConfig` (`RaptorQConfig::security`)
   - `auth_mode`, `auth_key_seed`, `reject_unauthenticated`
+  - `auth_key_seed` is deterministic test/replay configuration, not production
+    key provisioning: its input contains at most 64 bits of entropy. Production
+    integrations should inject a `SecurityContext` backed by 32 CSPRNG- or
+    secret-manager-generated bytes rather than relying on the seed knob.
 
 `RuntimeProfile::to_config()` provides baseline presets (`Development`,
 `Testing`, `Staging`, `Production`, `HighThroughput`, `LowLatency`).
@@ -444,7 +1113,7 @@ Schema fields (v1):
 
 ### Formal Semantics (v4.0.0)
 
-The canonical small-step semantics live in `docs/asupersync_v4_formal_semantics.md`
+The canonical small-step semantics live in `asupersync_v4_formal_semantics.md` (project root; the in-`docs/` copy is now a redirect stub — see br-asupersync-4nw2lb)
 and are tagged **v4.0.0**. This is the ground-truth model for regions, tasks,
 obligations, cancellation, scheduler lanes, and trace equivalence. It is intended
 to be mechanically translatable to TLA+/Lean/Coq without a rewrite.
@@ -492,8 +1161,8 @@ proof_impact:
     - <test or suite name>
   refinement_or_schema_impact: none|yes
   evidence_commands:
-    - rch exec -- cargo check --all-targets
-    - rch exec -- cargo clippy --all-targets -- -D warnings
+    - rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_docs cargo check --all-targets
+    - rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_docs cargo clippy --all-targets -- -D warnings
   review_artifact_location: <PR body section or attached artifact path>
 ```
 
@@ -557,6 +1226,14 @@ Canonical incident triage flow (must be followed in order):
 3. `route_disposition`: apply class policy (`fail-fast` or `fail-safe`) and assign mitigation owner.
 4. `governance_escalation`: open/update blocker bead and record governance thread/sign-off status.
 
+Incident forensics playbook (asupersync-umelq.12.5):
+- Canonical operator guidance: `docs/replay-debugging.md` ->
+  `WASM Incident Forensics Playbook (asupersync-umelq.12.5)`.
+- Deterministic drill command:
+  `bash ./scripts/run_all_e2e.sh --suite wasm-incident-forensics`
+- Contract drift gate:
+  `python3 ./scripts/check_incident_forensics_playbook.py`
+
 Governance integration requirement:
 - Every unresolved reliability guardrail failure must be reviewed on the same cadence IDs used by the refinement reporting contract in `formal/lean/coverage/runtime_state_refinement_map.json` (`reporting_and_signoff_contract.report_cadence`).
 
@@ -581,10 +1258,10 @@ Deterministic checklist (mark each item `pass`/`fail`/`n/a`):
 Required evidence commands for checklist completion:
 
 ```bash
-rch exec -- cargo check --all-targets
-rch exec -- cargo clippy --all-targets -- -D warnings
-rch exec -- cargo test --test refinement_conformance -- --nocapture
-rch exec -- cargo test --test lean_invariant_theorem_test_link_map -- --nocapture
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_docs cargo check --all-targets
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_docs cargo clippy --all-targets -- -D warnings
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_docs cargo test --test refinement_conformance -- --nocapture
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_docs cargo test --test lean_invariant_theorem_test_link_map -- --nocapture
 ```
 
 Performance-change review evidence example (bd-2pja4):
@@ -670,9 +1347,9 @@ proof_guided_optimization:
     - <OPT-* constraint id>
     - <coverage artifact path>
   required_checks:
-    - rch exec -- cargo check --all-targets
-    - rch exec -- cargo clippy --all-targets -- -D warnings
-    - rch exec -- cargo test --test refinement_conformance -- --nocapture
+    - rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_docs cargo check --all-targets
+    - rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_docs cargo clippy --all-targets -- -D warnings
+    - rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_docs cargo test --test refinement_conformance -- --nocapture
   evidence:
     metrics_before: <artifact/link>
     metrics_after: <artifact/link>
@@ -877,7 +1554,7 @@ Key points:
 ```ignore
 use asupersync::config::RaptorQConfig;
 use asupersync::raptorq::{RaptorQReceiverBuilder, RaptorQSenderBuilder};
-use asupersync::transport::mock::{sim_channel, SimTransportConfig};
+use asupersync::transport::deterministic::{sim_channel, SimTransportConfig};
 use asupersync::types::symbol::{ObjectId, ObjectParams};
 use asupersync::Cx;
 
@@ -1002,7 +1679,7 @@ registry.unregister("counter")?;
 Runnable minimal end-to-end example:
 
 ```bash
-cargo run --example spork_minimal_supervised_app
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_spork_integration_docs cargo run --example spork_minimal_supervised_app
 ```
 
 This example lives at `examples/spork_minimal_supervised_app.rs` and demonstrates:
@@ -1017,6 +1694,97 @@ What to verify in lab tests:
 - no obligation leaks (reply/name leases resolve)
 - restart policy behavior is deterministic for same seed
 - monitor/down ordering is replay-stable
+
+### Session-Typed Obligations
+
+The opt-in session-typed obligation surface lives in
+`src/obligation/session_types.rs`. The code now publishes a rollout contract via
+`session_protocol_adoption_specs()` so the typed API and the legacy
+runtime-checked API stay unambiguous during adoption.
+The currently supported runtime bridge is intentionally narrow: in-process
+bounded `mpsc` transport via `new_transport_pair()` and the async session
+transition methods. Cross-process/network bindings are still deferred.
+
+First-wave protocol families:
+
+- `send_permit`: adopt first on explicit reserve/send-or-abort paths that
+  already resolve a `SendPermit` through the obligation ledger.
+- `lease`: adopt first on lease-backed naming/resource lifecycles with a single
+  obvious holder and an explicit release path.
+- `two_phase`: adopt first on reserve/commit-or-abort effect APIs where the
+  fallback remains `ObligationLedger::{commit, abort}`.
+
+Each adoption spec documents:
+
+1. Canonical states and transitions for migration review.
+2. Compile-time guarantees from typestate linearity.
+3. Runtime oracle complements that remain authoritative during rollout.
+4. Existing migration/compile-fail validation surfaces.
+5. Stable diagnostics fields required to debug typed-protocol adoption.
+
+Current AA-05.3 validation surfaces:
+
+- compile-fail doctests in `src/obligation/session_types.rs`
+- typed/dynamic migration parity in `tests/session_type_obligations.rs`
+- rollout contract/unit invariants in `src/obligation/session_types.rs`
+
+Direct `rch` rerun commands:
+
+- `rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_docs cargo test --doc -- --nocapture`
+- `rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_integration_docs cargo test --test session_type_obligations -- --nocapture`
+
+Troubleshooting rules:
+
+- If a compile-fail example starts compiling, treat it as a typestate regression and keep the typed surface experimental.
+- If typed and dynamic paths disagree on the valid resolution shape, treat `src/obligation/ledger.rs` as authoritative and debug the typed wrapper before expanding rollout scope.
+- When diagnosing rollout issues, log and inspect the stable fields `channel_id`, `from_state`, `to_state`, `trace_id`, `obligation_kind`, `protocol`, and `transition`.
+
+Current runtime-oracle complements:
+
+- `src/obligation/ledger.rs`
+- `src/obligation/marking.rs`
+- `src/obligation/no_leak_proof.rs`
+- `src/obligation/no_aliasing_proof.rs`
+- `src/obligation/dialectica.rs`
+- `src/obligation/separation_logic.rs`
+- `src/cx/registry.rs`
+
+Adoption rule:
+
+- Use the typed surface where the protocol boundary is already explicit.
+- Keep the legacy dynamic surface as the fallback and audit/reference oracle.
+- Do not start with open-ended adapter layers or flows that rely on implicit
+  cleanup by `Drop`.
+
+### Restricted Static Leak Checker Pilot
+
+The restricted AA-05.2 static-analysis pilot lives in
+`src/obligation/leak_check.rs`. It does not attempt whole-Rust analysis.
+Instead, it makes the structured-IR boundary explicit with
+`static_leak_check_contract()` and returns a conservative graded-budget summary
+through `CheckResult::graded_budget`.
+
+What the pilot now guarantees on its covered surface:
+
+- deterministic machine-readable diagnostic codes for CI/logging
+- stable structured-IR locations for instruction and scope-exit findings
+- remediation hints paired with each diagnostic class
+- conservative peak outstanding-obligation counts on the same `Body` IR
+
+What remains intentionally out of scope:
+
+- loops/recursion without explicit IR unrolling
+- interprocedural aliasing or ownership transfer not represented in `Body`
+- ambient `Drop` cleanup or runtime side effects outside the IR
+- Rust-source parsing, macro expansion, and dynamic dispatch analysis
+
+Interpretation rule:
+
+- A clean result means the supplied structured IR is balanced.
+- It does not replace runtime enforcement for uncovered patterns.
+- `src/obligation/ledger.rs`, `src/obligation/marking.rs`,
+  `src/obligation/no_leak_proof.rs`, and `src/obligation/graded.rs`
+  remain the authoritative runtime/oracle surfaces.
 
 Primary references:
 - `docs/spork_glossary_invariants.md`
@@ -1071,21 +1839,310 @@ never stdout/stderr.
 
 ### 5) Distributed Regions (conceptual)
 
-The distributed API is in-progress. The intent is to provide region-scoped
-fault tolerance with explicit leases and idempotency. Today there are two
-entrypoints: `distributed` for region snapshot/replication/recovery, and
-`remote` for named computations with leases and idempotency. The `remote`
-surface is Phase 0 (handle-only; no network transport yet), and all remote
-operations require `RemoteCap` from `Cx` (no closure shipping).
+The distributed API provides region-scoped fault-tolerance primitives with
+explicit leases and idempotency. There are two entrypoints: `distributed` for
+region snapshot/replication/recovery, and `remote` for named computations with
+leases and idempotency. The `remote` surface defines message schemas,
+origin/remote state machines, idempotency, lease handling, capability gating,
+a native TCP+mTLS V3 client/service, and `NativeRemoteRuntime`. Callers can
+attach their own `RemoteRuntime` / `RemoteTransport`, use the native V3 route,
+or exercise the deterministic no-runtime fallback. All remote operations
+require `RemoteCap` from `Cx`; the protocol never ships closures.
+
+For a fixed deployment topology,
+`RemoteComputationClient::from_bootstrap_endpoints` accepts an ordered, unique,
+nonempty static endpoint set. The existing `new` constructor remains the
+single-endpoint shorthand and `endpoint()` continues to return the primary.
+The client rotates endpoints only after transient TCP or TLS establishment
+failures that precede request publication, within the existing finite
+attempt/backoff policy. Cancellation, attempt timeout, server-name or
+certificate-pin rejection, authenticated framing/session errors, EOF, and
+delivery-ambiguous outcomes never advance to another endpoint. A
+`NativeRemoteRuntime` route uses the same policy because it owns the configured
+client. This is pre-delivery static bootstrap failover; it does not provide
+active refresh by itself, health-based balancing, durable route storage, or WAN
+policy.
+
+An outer control plane can bridge an existing
+`Discover<Key = SocketAddr>` source into this route model without rebuilding
+authentication policy. After a successful caller-owned `poll_discover`, use
+`RemoteComputationClient::with_discovered_endpoints` or
+`NativeRemoteRoute::with_discovered_endpoints` to validate the current endpoint
+snapshot, then publish the complete route set with
+`NativeRemoteRuntime::replace_routes`. The rebound client retains server name,
+trust roots, client certificate/key identity, enforcing pins, frame and timeout
+bounds, retry policy, destination, and V3 hello. Empty or duplicate endpoint
+snapshots are rejected before route publication. These conversion methods do
+not poll, spawn, persist, or select endpoints.
+
+For active refresh without an ambient task, build a
+`NativeRemoteDiscoveryDriver` around an `Arc<NativeRemoteRuntime>`, exactly one
+logical destination, and an `Arc` discovery source, then await `run(&cx)` in a
+caller-owned region task:
+
+```rust,no_run
+# use std::sync::Arc;
+# use std::time::Duration;
+# use asupersync::remote::{NativeRemoteDiscoveryConfig, NativeRemoteDiscoveryDriver};
+# async fn run_driver<D>(
+#     cx: &asupersync::Cx,
+#     runtime: Arc<asupersync::remote::NativeRemoteRuntime>,
+#     destination: asupersync::remote::NodeId,
+#     discovery: Arc<D>,
+# ) -> Result<(), Box<dyn std::error::Error>>
+# where D: asupersync::service::Discover<Key = std::net::SocketAddr> + Send + Sync + 'static {
+let driver = NativeRemoteDiscoveryDriver::new(
+    runtime,
+    destination,
+    discovery,
+    NativeRemoteDiscoveryConfig::new()
+        .with_poll_interval(Duration::from_secs(30))
+        .with_retry_backoff(Duration::from_secs(5))
+        .with_max_consecutive_failures(8),
+)?;
+let report = driver.run(cx).await?;
+assert!(report.polls() >= 1);
+# Ok(())
+# }
+```
+
+The first poll is immediate. Each synchronous discovery poll runs on the
+supplied context's blocking pool and is awaited to completion; a context without
+blocking-pool authority returns `BlockingPoolUnavailable` before polling.
+Configure the owning `RuntimeBuilder` with nonzero `blocking_threads` before
+constructing the supplied context. Cancellation prevents future polls but can wait for the current source
+operation, so production sources must bound their own poll. Source errors and
+empty, duplicate, or invalid snapshots retain the last-known-good route and
+retry only after the configured nonzero backoff. A changed valid snapshot replaces only the selected
+destination under one route-snapshot write lock; unrelated destinations survive
+concurrent drivers, unchanged snapshots do not advance generation, and a
+removed destination terminates the driver instead of being resurrected. Callers
+may compose `ActiveHealthDiscovery` explicitly, but the driver does not choose a
+health algorithm, persist routes, reload configuration/certificates, or claim
+general WAN reliability.
+
+Unix builds also expose a supported static process boundary behind the
+additive `remote-service` feature:
+
+```bash
+asupersync --format stream-json --config /etc/asupersync/remote.toml remote serve
+```
+
+Operators can exercise that exact process boundary from a second packaged
+process with `remote probe`. The client file is also strict and versioned:
+
+```toml
+schema_version = 1
+protocol = "3.0"
+bootstrap_endpoints = ["10.0.0.11:7443", "10.0.0.12:7443"]
+server_name = "remote.internal.example"
+server_ca_bundle = "/run/secrets/remote-server-ca.crt"
+client_certificate_chain = "/run/secrets/origin-a.crt"
+client_private_key = "/run/secrets/origin-a.key"
+server_spki_sha256 = ["BASE64_ENCODED_32_BYTE_SPKI_SHA256"]
+origin_node = "origin-a"
+max_frame_bytes = 1048576
+connect_timeout_ms = 5000
+tls_handshake_timeout_ms = 5000
+attempt_timeout_ms = 30000
+completion_timeout_ms = 30000
+max_attempts = 2
+initial_backoff_ms = 50
+max_backoff_ms = 1000
+lease_ms = 30000
+full_jitter = true
+tcp_nodelay = true
+```
+
+```bash
+asupersync --format stream-json --config /etc/asupersync/remote-probe.toml \
+  remote probe --payload deployment-ready
+```
+
+Relative certificate paths resolve from the probe file's directory. The
+client requires an enforcing server SPKI pin set in addition to certificate
+trust, applies finite connect, TLS, pre-accept attempt, post-accept completion,
+retry, and lease bounds, and emits a `remote_probe_completed` record only after
+the V3 task-correlated response is an exact echo. The receipt contains the
+payload length and digest, not the payload or private-key material. Refused TCP
+establishment can advance through the ordered static bootstrap set; server-name
+or pin rejection and every delivery-ambiguous failure stop on the current
+endpoint.
+
+The service command requires a strict `schema_version = 2`,
+`protocol = "3.0"` TOML file. It loads a server certificate/key and client CA
+bundle, requires mutual TLS, and binds each configured logical `node_id` to an
+enforcing set of SPKI SHA-256 pins plus an exact computation allowlist. Service
+and probe schema versions are independent; the probe file above remains schema
+v1. The packaged command's registry contains only
+`asupersync.remote.echo.v1` (`Vec<u8> -> Vec<u8>`):
+
+```toml
+schema_version = 2
+protocol = "3.0"
+listen = "127.0.0.1:7443"
+listen_scope = "loopback_only"
+server_certificate_chain = "/run/secrets/remote-server.crt"
+server_private_key = "/run/secrets/remote-server.key"
+client_ca_bundle = "/run/secrets/client-ca.crt"
+max_frame_bytes = 1048576
+max_connections = 256
+tls_handshake_timeout_ms = 5000
+initial_frame_timeout_ms = 5000
+drain_timeout_ms = 30000
+idempotency_retention_ms = 300000
+max_idempotency_records_per_peer = 1024
+
+[[peers]]
+node_id = "origin-a"
+spki_sha256 = ["BASE64_ENCODED_32_BYTE_SPKI_SHA256"]
+computations = ["asupersync.remote.echo.v1"]
+```
+
+Application binaries built with `remote-service` can apply that exact strict
+boundary to a caller-provided, statically linked registry:
+
+```rust,ignore
+let mut computations = RemoteComputationRegistry::new();
+computations.register::<Request, Response, _, _>(
+    "orders.reconcile.v1",
+    |_cx, invocation| async move { reconcile(invocation).await },
+)?;
+let bootstrap = RemoteComputationServiceBootstrap::from_toml_file(
+    "/etc/asupersync/remote.toml",
+    computations,
+)?;
+let (service, identity) = bootstrap.bind().await?;
+let operator = service.handle();
+let report = service.run(cx).await?;
+```
+
+`from_toml_file` is synchronous by design: it consumes the executable registry
+and validates the strict schema, exposure decision, relative TLS paths, trust
+anchors, enforcing pins, duplicate grants, and every configured computation
+before a socket can be opened. `bind` is the only network-opening phase.
+`identity.computations()` lists the complete registry in deterministic sorted
+order and its fingerprint is the exact admission fingerprint. A missing
+configured handler returns typed `UnknownComputation`; a registered but
+ungranted handler remains visible in identity and is refused before dispatch.
+The embedder owns readiness publication and the service handle used for drain.
+
+Unknown fields and versions, zero bounds, duplicate/empty peer grants,
+unregistered computations, invalid pins, and unusable TLS files are rejected
+before bind. `listen` must be a literal socket address. `listen_scope =
+"loopback_only"` rejects non-loopback and wildcard addresses; `listen_scope =
+"network"` rejects loopback addresses and is the required explicit opt-in for
+cross-host exposure. The network setting does not configure or prove host
+firewalls, routing, DNS, load balancing, certificate deployment, or production
+WAN reliability. The TLS-handshake and initial-frame deadlines release capacity
+held by unauthenticated or silent authenticated peers. Relative TLS paths
+resolve against the config directory. A flushed `remote_service_ready` record
+is the readiness boundary. The first SIGINT or
+SIGTERM begins graceful drain; a second signal force-closes outstanding work.
+The terminal record is emitted only after connection-region and runtime
+quiescence. Never place private-key bytes in configuration diagnostics or logs.
+The packaged probe remains limited to the built-in diagnostic computation. It
+does not become a generic application client and does not add discovery,
+health-based balancing, dynamic plugins/code shipping, or durable idempotency;
+configured application hosting through the library bootstrap is a separate
+statically linked composition surface.
+
+#### Operator rollback
+
+The supported deployment class is the opt-in Unix `remote-service` static
+process boundary. It does not promise hot reload, live state migration,
+restart-durable idempotency, or automatic route/certificate rollback. Preserve
+the last-known-good binary, strict service and probe files, certificate set, and
+deployment-owned route/firewall state as one versioned rollback unit.
+
+Use this rollback sequence:
+
+1. Remove the instance from upstream traffic so no new caller can begin work.
+2. Send one SIGTERM and wait through the configured drain bound for a flushed
+   `remote_service_stopped` record whose active-connection count is zero.
+3. If the drain bound expires, send a second SIGTERM to force-close the remaining
+   connections. Mark their operations delivery-ambiguous; never replay them
+   automatically because the replacement process cannot inherit the old
+   process-local idempotency table.
+4. Restore the complete last-known-good unit. Do not mix binary, configuration,
+   certificate, pin/grant, or routing generations.
+5. Start the prior binary, wait for its flushed `remote_service_ready` record,
+   then run the packaged `remote probe` with a fresh task identity through the
+   intended route before restoring upstream traffic.
+
+Process startup without readiness plus the authenticated probe is not a
+successful rollback. Do not reuse an in-flight task ID or infer whether an
+ambiguous operation committed. If terminal quiescence, prior configuration
+validation, readiness, or the probe fails, keep the instance out of service and
+escalate. Rolling back restores a known executable and policy boundary; it does
+not recover in-flight computation state.
+
+The schema-v2 acceptance run used two distinct RCH workers: `hz3` hosted the
+packaged network-scope service and `hz4` ran the packaged probe. Mutual TLS and
+both SPKI policies admitted exactly one 23-byte echo with SHA-256
+`25250ce86841943e3b4f69558860a0919c455b4da4d8a6d2197d3f1b4396dc1c`.
+The service then handled SIGTERM, exited its RCH job successfully, and reported
+one accepted/completed connection with zero active, failed, interrupted, or
+panicked connections. This proves that specific two-host fleet path; it does
+not establish discovery, health balancing, firewall or route provisioning,
+certificate rollout, load balancing, or general production-WAN reliability.
+
+The shipped proof tier is protocol/state-machine plus three transport tiers.
+Protocol V1, V2, and V3 service JSON is a strict compatibility boundary:
+requests, nested peer/version/budget metadata, typed runtime IDs, depth-bounded
+recursive cancellation reasons, outcomes, responses, and V3 commands/events reject
+unknown fields. Exact serialization goldens cover every shipped request
+generation and enum variant. Do not add, remove, rename,
+retype, retag, or reorder a serialized field under an existing version; mint a
+new `RemoteProtocolVersion` and add its negotiation and golden coverage. Even
+an otherwise additive same-version field is incompatible because older peers
+must refuse it rather than guess at semantics.
+`remote_virtual_lifecycle_proof_exercises_runtime_transport_and_protocol` keeps
+the deterministic lab baseline. `tests/remote_transport_lifecycle_contract.rs`
+adds a production-transport-backed loopback proof through
+`asupersync::net::TcpListener` / `TcpStream` and the injected `RemoteRuntime` /
+`RemoteTransport` boundaries. It covers accepted spawn/result delivery,
+cancellation before ack, cancellation while running, lease renewal, lease
+expiry, idempotent duplicate handling, send-failure cleanup, receive EOF,
+delayed ack, malformed envelope cleanup, deterministic fallback, capability
+denial, required structured logs, and trace emission. The same contract now
+also launches the CLI as a separate OS process, waits on causal readiness,
+proves a certificate-authenticated but unauthorized NodeId is refused, proves
+an authorized echo over real mTLS, verifies both admission deadlines release
+the sole connection slot, sends two SIGTERMs around a live stalled session,
+and verifies forced terminal quiescence. The same contract also consumes a
+three-handler application registry through the configured bootstrap, executes
+two non-echo handlers over real TCP+mTLS, proves an ungranted handler is never
+dispatched, proves a missing handler fails before bind, and drains to zero live
+connections. That committed evidence is localhost/in-process application-hosting
+evidence; the separate terminal schema-v2 acceptance run above adds one
+two-worker packaged mTLS path. The active-discovery lifecycle case additionally
+keeps one real mTLS operation live on route A while source and snapshot refusals
+retain A, publishes B exactly once for later work, preserves an unrelated
+destination, and terminates without resurrecting a removed route. These are not
+dynamic plugins/code shipping, route persistence, Windows service control,
+restart-durable idempotency, or general production-WAN evidence. V3
+retry/deduplication state is process-local;
+ambiguous delivery must remain fail-closed across restart.
+The compatibility goldens do not substitute for archived-binary interop,
+multi-host/WAN evidence, or restart-durable idempotency proof.
+Focused lifecycle cases additionally prove ordered static failover from a
+refused primary to one authenticated secondary dispatch through both the
+direct call path and `NativeRemoteRuntime` V3, plus exact exhaustion,
+cancellation-before-next-dial, and enforced pin-mismatch non-fallthrough.
 
 ---
 
 ### 6) Remote Protocol Spec (Named Computations)
 
-This section defines the Phase 1+ **remote structured concurrency protocol**.
-It is transport-agnostic and uses the message types defined in `src/remote.rs`
+This section describes the transport-independent **remote structured concurrency
+model** and the shipped service compatibility boundary. The abstract message
+examples use the message types defined in `src/remote.rs`
 (`RemoteMessage`, `SpawnRequest`, `SpawnAck`, `CancelRequest`, `ResultDelivery`,
-`LeaseRenewal`).
+`LeaseRenewal`); they are not byte-for-byte service requests. The shipped V1/V2/V3
+service uses `RemotePeerHello`, versioned requests/responses, and V3 session
+commands/events from that file. Its exact JSON goldens and the production
+transport description above govern existing wire compatibility.
 
 **Goals**
 - Deterministic, replayable message encoding.
@@ -1096,8 +2153,11 @@ It is transport-agnostic and uses the message types defined in `src/remote.rs`
 
 #### 6.1 Handshake (transport-level)
 
-Before exchanging `RemoteMessage` envelopes, peers perform a transport-level
-handshake:
+Before dispatch, the service validates peer metadata and an exact supported
+`RemoteProtocolVersion`; network adapters must bind the asserted NodeId to an
+authenticated transport identity. `RemotePeerHello` carries `peer_node`,
+`protocol_version`, and `registry_fingerprint`. The following richer handshake
+is a conceptual negotiation sketch, not the shipped hello JSON:
 
 ```
 Hello = {
@@ -1110,8 +2170,8 @@ Hello = {
 ```
 
 Rules:
-- **Major version mismatch** -> connection rejected.
-- **Minor version mismatch** -> allowed if receiver supports the sender's minor.
+- **Version mismatch** -> rejected unless the selected service path explicitly
+  supports that exact version; no implicit minor-version compatibility.
 - `registry_hash` is the hash of the *named computation registry*; mismatch
   is allowed but MUST be logged and MAY trigger `UnknownComputation` rejections.
 - Capability negotiation is **deny by default**: if the receiver does not list
@@ -1122,17 +2182,22 @@ handshake completion and version checks.
 
 #### 6.2 Serialization Format (deterministic)
 
-All protocol frames use **canonical CBOR (RFC 8949)** with deterministic
-map key ordering. Implementations MAY additionally expose JSON debug encoding
-for test vectors, but canonical CBOR is the wire format.
+Shipped V1/V2/V3 service frames use strict JSON with bounded big-endian
+length-delimited framing. `encode_remote_service_frame` and
+`read_remote_service_frame` in `src/remote.rs` implement that boundary.
+Serialization goldens freeze the existing field order, tags, and byte encoding;
+do not substitute a generic canonicalizer or a new encoding under those versions.
+Canonical CBOR was an earlier design proposal and would need a new, explicitly
+negotiated protocol version before adoption.
 
-Canonical type mappings:
+Abstract model type mappings (not service serialization instructions):
 - `NodeId` -> UTF-8 string
 - `RemoteTaskId` -> u64
 - `IdempotencyKey` -> hex string `"IK-<32 hex>"` (lowercase)
 - `Time` / `Duration` -> u64 nanoseconds
 - `RegionId`, `TaskId` -> `{ "index": u32, "generation": u32 }`
-- `RemoteInput` / `RemoteOutcome::Success` payload -> byte string (CBOR bytes)
+- `RemoteInput` / `RemoteOutcome::Success` payload -> an opaque byte sequence;
+  preserve the representation encoded by the existing service types and goldens.
 
 #### 6.3 Envelope Schema
 
@@ -1246,12 +2311,19 @@ Capability checks:
 #### 6.5 Idempotency Rules
 
 - Each `SpawnRequest` MUST include an `IdempotencyKey`.
-- On duplicate request with same key:
-  - If computation + input match: return the original `SpawnAck` without re-executing.
+- Admission MUST atomically reserve a new key before canonical execution starts.
+- While a record is retained, a duplicate request with the same key:
+  - If computation + input match: return an accepted acknowledgement correlated
+    to the current attempt and attach it to the original canonical execution
+    without re-executing; return the cached outcome if already terminal.
   - If computation + input differ: respond with `SpawnAck` rejected
     `IdempotencyConflict`.
-- Idempotency records expire per `IdempotencyStore` TTL; expired keys are treated
-  as new requests.
+- In-flight records MUST remain resident for the operation lifetime and MUST NOT
+  expire merely because execution exceeds the configured TTL.
+- Completion starts the terminal-result retention TTL. Once that deadline
+  elapses, or after the store is reset, the key may be admitted as a new request.
+- A completion MUST identify the current canonical task for the key; delayed
+  completions from an expired and replaced record generation are rejected.
 
 #### 6.6 Lease Rules
 
@@ -1263,15 +2335,22 @@ Capability checks:
 
 #### 6.7 Compatibility & Versioning
 
-- Unknown fields MUST be ignored (forward compatibility).
+- Shipped service messages reject unknown fields, including nested metadata;
+  unknown variants are rejected as well.
 - Missing required fields MUST reject the message.
-- Major version mismatch => disconnect; minor mismatch => accept if supported.
+- Admission requires an exact supported protocol version. Field additions,
+  removals, renames, type/tag changes, and reordering require a new version with
+  explicit negotiation and goldens; optional fields are not silently compatible.
 - `sender_time` kinds may differ; if incompatible, receivers treat causal order
   as `Concurrent` and proceed without ordering assumptions.
 
-#### 6.8 Test Vectors (JSON, debug-only)
+#### 6.8 Abstract Model Examples (not service wire goldens)
 
-For JSON debug vectors, `input` / `output` byte fields are base64 strings.
+These historical envelope examples use base64 strings for `input` / `output`.
+They illustrate the abstract model; do not send them to the shipped service or
+use them to rewrite its JSON byte representation. Executable service wire
+goldens live in `tests/remote_transport_lifecycle_contract.rs`, alongside the
+unknown-field rejection tests for the types in `src/remote.rs`.
 
 **SpawnRequest**
 ```json
@@ -1324,15 +2403,16 @@ For JSON debug vectors, `input` / `output` byte fields are base64 strings.
 }
 ```
 
-#### 6.9 Stub Implementation Hooks
+#### 6.9 Current Integration Hooks
 
-The Phase 0 harness and runtime already include hook points for integrating
-the protocol:
+The runtime already includes hook points for integrating the protocol:
 
 - `src/remote.rs`: `RemoteTransport` trait (`send`, `try_recv`)
 - `src/remote.rs`: `MessageEnvelope` + `RemoteMessage` types
 - `src/remote.rs`: `trace_events::*` constants for structured tracing
-- `src/lab/network/harness.rs`: `encode_message` / `decode_message` placeholder codec
+- `src/lab/network/harness.rs`: `encode_message` / `decode_message` deterministic
+  lab-only envelope store used as the simulated-network codec (not the
+  production wire format)
 
 These locations are the intended integration points for the real transport
 and wire codec.

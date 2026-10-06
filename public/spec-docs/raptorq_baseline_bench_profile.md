@@ -23,6 +23,10 @@ Machine-readable contract:
 - top-level key: `g1_budget_draft`
 - schema tag: `g1_budget_draft.schema_version = raptorq-g1-budget-draft-v1`
 - canonical sections: `workload_taxonomy`, `budget_sheet`, `profile_gate_mapping`, `confidence_policy`, `correctness_prerequisites`, `structured_logging`
+- standalone budget artifact: `artifacts/raptorq_performance_budgets_v1.json`
+- standalone artifact anchor: `budget_bead_id = bd-3v1cs`
+- standalone artifact phase: `budget_phase = draft_scaffold_pending_calibration_refresh`
+- standalone sections checked by `tests/raptorq_perf_invariants.rs`: `workload_budgets`, `slo_definitions`, `ci_gate_profiles`, `structured_log_fields`, `closure_calibration`
 
 ## Quickstart Commands
 
@@ -33,8 +37,14 @@ rch exec -- target/release/deps/raptorq_benchmark-60b0ce0491bd21fa --bench rapto
 
 ### Full
 ```bash
-rch exec -- ./scripts/run_perf_e2e.sh --bench raptorq_benchmark --bench phase0_baseline --seed 424242 --save-baseline baselines/ --no-compare
+RCH_BUILD_TIMEOUT_SEC=5400 rch exec -- ./scripts/run_perf_e2e.sh --bench raptorq_benchmark --bench phase0_baseline --seed 424242 --save-baseline baselines/ --no-compare
 ```
+
+Cold full `release-perf` / `phase0_baseline` sweeps can run for longer than
+rch's default 1200-second command timeout. Keep `RCH_BUILD_TIMEOUT_SEC=5400`
+on full-sweep commands unless you are intentionally supplying a different
+timeout budget; `scripts/capture_baseline.sh --run` and `--smoke` apply the
+same default for their built-in benchmark command.
 
 ### Forensics
 ```bash
@@ -56,6 +66,57 @@ rch exec -- valgrind --tool=callgrind --callgrind-out-file=target/perf-results/p
 | `RQ-G1-E2E-RANDOM-LOWLOSS` | Deterministic E2E conformance | low repair density, random loss | Low-loss real-world decode behavior | `decode_success`, `median_ns` |
 | `RQ-G1-E2E-RANDOM-HIGHLOSS` | Deterministic E2E conformance | high repair density, random loss | High-loss decode resilience | `decode_success`, `median_ns` |
 | `RQ-G1-E2E-BURST-LATE` | Deterministic E2E conformance | burst loss (late window) | Burst-loss recovery behavior | `decode_success`, `median_ns` |
+
+## Adaptive Block Layout Tuning Guidance (`asupersync-raptorq-leverage-3bb2pl.3`)
+
+The distributed encoder now records an `EncodingLayoutDecision` for every
+snapshot encoding. Unknown path quality intentionally stays on
+`static-block-layout-v1`; adaptive behavior is opt-in through a replayable
+`PathQualitySnapshot` carried by `EncodingConfig::path_quality` or
+`DistributionConfig::encoding_path_quality`.
+
+Current policy table:
+
+| Reason ID | Path-quality bound | Requested source-block divisor | Repair multiplier | Operator interpretation |
+|---|---|---:|---:|---|
+| `clean-low-rtt` | loss `<=10` permille, RTT `<=50ms`, reorder `<=1` | `1` | `1.00x` | Preserve configured block count and latency floor. |
+| `clean-high-rtt` | loss `<=10` permille, any RTT, reorder `<=2` | `2` | `1.10x` | Trade a little decode latency for fewer block-level control turns. |
+| `moderate-loss` | loss `<=50` permille, any RTT, reorder `<=8` | `2` | `1.25x` | Keep larger extended blocks and add enough repairs to cover ordinary loss. |
+| `lossy` | loss `<=150` permille, any RTT, reorder `<=16` | `4` | `1.75x` | Bias toward fewer, larger blocks because retransmit/control latency dominates. |
+| `severe-loss-or-reorder` | catch-all | `8` | `2.50x` | Fail conservative on extreme or malformed quality snapshots. |
+
+Tuning rules:
+
+- Treat `loss_ewma_permille` as the primary monotone axis: worse loss must not
+  reduce repair overhead or request smaller extended blocks.
+- Treat RTT and reorder as tie-breakers, not proof of loss. High RTT moves clean
+  paths to larger blocks because waiting on block-level control is expensive;
+  it does not by itself justify the high-loss repair multipliers.
+- Keep `path-quality-unknown` as the production-safe fallback. If the transport
+  cannot produce a replayable snapshot, the encoder must preserve the configured
+  static layout.
+- Compare adaptive-vs-static completion by same-seed runs over the same object
+  size and symbol size. Directional claims should report
+  `policy_id`, `reason_id`, `path_quality`, `requested_source_blocks`,
+  `effective_source_blocks`, `effective_min_repair_symbols`, replica-ack
+  completion time, and the artifact path.
+- Do not treat this table as a throughput benchmark by itself. The current unit
+  proof covers deterministic policy selection and telemetry; loss-matrix E2E
+  evidence and benchmark evidence remain separate acceptance surfaces for the
+  bead.
+
+Galaxy-brain card: the policy is an expected-completion-time heuristic, not a
+raw decode-throughput heuristic. In clean low-RTT cells, extra repairs and
+larger extended blocks mostly add encode/decode work and can delay first
+delivery. In lossy or high-control-latency cells, splitting into many small
+blocks increases the chance that at least one block waits on scarce repairs or
+another control turn. The table therefore moves in one direction only:
+loss/reorder pressure increases repair margin, and loss/RTT/reorder pressure
+reduces requested source-block count so each block has a larger recovery
+envelope. The no-win boundary is explicit: if future same-seed loss-matrix
+evidence shows a row regresses clean-cell completion or fails to improve lossy
+cells, update the table with a new policy id rather than silently changing
+`adaptive-block-layout-v1`.
 
 ## Draft Budget Sheet (G1)
 
@@ -92,6 +153,12 @@ Budget source: `baseline_current.json` and phase0 throughput logs listed above. 
 | `fast` | direct benchmark invocation (quickstart fast) | `RQ-G1-ENC-SMALL`, `RQ-G1-E2E-RANDOM-LOWLOSS` | <= 3 minutes wall time on standard CI runner | PR/smoke directional signal |
 | `full` | `scripts/run_perf_e2e.sh --bench ... --seed 424242` | all workload IDs in taxonomy table | <= 30 minutes wall time on standard CI runner | merge/release evidence |
 | `forensics` | callgrind + artifact capture (quickstart forensics) | `RQ-G1-ENC-SMALL`, `RQ-G1-GF256-ADDMUL`, `RQ-G1-SOLVER-MARKOWITZ`, `RQ-G1-E2E-BURST-LATE` | <= 90 minutes wall time on standard CI runner | deep regression root-cause packet |
+
+The standalone budget artifact mirrors this mapping in `ci_gate_profiles` so
+CI tooling can consume the same `fast` / `full` / `forensics` profile contract
+without scraping this document. Its `closure_calibration.status` intentionally
+remains `draft_not_closeable` until the refreshed baseline corpus is committed
+and the budget numbers are recalculated from that corpus.
 
 ## Correctness Prerequisites for Performance Claims
 
@@ -143,28 +210,94 @@ Artifact path conventions by profile:
 Track-E dual-lane policy probes are emitted from `benches/raptorq_benchmark.rs` under benchmark group `gf256_dual_policy`:
 
 ```bash
-rch exec -- cargo bench --bench raptorq_benchmark -- gf256_dual_policy
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_raptorq_baseline_profile_docs cargo bench --bench raptorq_benchmark --features simd-intrinsics,criterion-benches -- gf256_dual_policy
 ```
 
 Probe log schema:
 
-- `schema_version = raptorq-track-e-dual-policy-probe-v2`
+- `schema_version = raptorq-track-e-dual-policy-probe-v6`
 - `manifest_schema_version`, `profile_schema_version`
 - `scenario_id`, `seed`
-- `kernel`, `mode`, `profile_pack`, `profile_fallback_reason`
+- `kernel`, `architecture_class`, `active_profile_architecture_class`
+- `target_arch`, `target_os`, `target_env`, `target_endian`, `target_pointer_width_bits`
+- `mode`, `mode_fallback_reason`, `profile_pack`, `profile_fallback_reason`
+- `rejected_profile_packs` lists every non-selected pack id for the active profile selection
+- `profile_catalog_count`, `tuning_candidate_catalog_count`
+- `tuning_corpus_id`
+- `dual_policy_env_requested`
+- `profile_pack_env_requested`
+- `mul_min_total_env_override`, `mul_max_total_env_override`
+- `addmul_min_total_env_override`, `addmul_max_total_env_override`, `addmul_min_lane_env_override`
+- `max_lane_ratio_env_override`
+- `selected_tuning_candidate_id`, `rejected_tuning_candidate_ids`
+- `command_bundle` keeps the manifest-side `gf256_primitives` comparator bundle distinct from the probe `repro_command`
+- `replay_pointer`
 - `lane_len_a`, `lane_len_b`, `total_len`, `lane_ratio`
 - `mul_window_min`, `mul_window_max`
 - `addmul_window_min`, `addmul_window_max`, `addmul_min_lane`
 - `max_lane_ratio`
 - `mul_decision`, `mul_decision_reason`
 - `addmul_decision`, `addmul_decision_reason`
+- `decision_artifact_id`, `decision_role`
+- `decision_evidence_status`
+- `selected_candidate_summary`, `rejected_candidate_set_summary`
+- `selected_mul_delta_vs_baseline_pct`
+- `selected_addmul_delta_vs_baseline_pct`
+- `selected_targeted_addmul_average_delta_pct`
 - `artifact_path`, `repro_command`
+
+Override truthfulness rule:
+
+- invalid `ASUPERSYNC_GF256_DUAL_POLICY` values fail closed to `mode = Auto`, but probe logs still surface
+  `mode_fallback_reason = unknown-requested-mode` together with `dual_policy_env_requested = true`
+  so malformed env requests remain visible in replay and bench forensics
+- if forced mode or numeric `ASUPERSYNC_GF256_*` window overrides mutate the live contract, the manifest/probe surface must fail closed instead of pretending the run still matches the catalog default
+- override runs therefore scrub canonical selection provenance to `tuning_corpus_id = manual-env-override-unbacked`,
+  `selected_tuning_candidate_id = manual-env-override-unbacked`,
+  `rejected_tuning_candidate_ids = none`,
+  `decision_role = runtime_override_not_canonical_profile_selection`,
+  `decision_artifact_id = manual_env_override_unbacked`,
+  `decision_evidence_status = runtime-override-unbacked`,
+  `replay_pointer = replay:rq-e-gf256-profile-pack-env-override-v1`
+  and an override-specific `command_bundle` placeholder:
+  `rch exec -- env <captured ASUPERSYNC_GF256_* override fields> cargo bench --bench raptorq_benchmark --features simd-intrinsics,criterion-benches -- gf256_primitives`
+  that tells operators to replay from the emitted override fields
+- the same override branch must keep the rationale/delta fields honest:
+  `selected_candidate_summary = runtime override changed the effective dual-policy contract; canonical selected candidate suppressed`,
+  `rejected_candidate_set_summary = override run is not a catalog-backed offline selection result; use emitted override fields to reproduce`,
+  `selected_mul_delta_vs_baseline_pct = n/a`,
+  `selected_addmul_delta_vs_baseline_pct = n/a`,
+  `selected_targeted_addmul_average_delta_pct = n/a`
 
 Coverage intent:
 
 - balanced lanes below/at/above fused windows
 - asymmetric lanes near and beyond ratio threshold
 - deterministic evidence for when auto policy selects fused vs sequential dual kernels
+
+Command-surface split:
+
+- Comparator/rollback bundle: manifest-level `command_bundle` in the profile-pack
+  snapshot remains anchored to `rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_raptorq_baseline_profile_docs cargo bench --bench raptorq_benchmark --features simd-intrinsics,criterion-benches -- gf256_primitives`.
+- Probe-specific bundle: the dual-policy log `repro_command` remains anchored to
+  `rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_raptorq_baseline_profile_docs cargo bench --bench raptorq_benchmark --features simd-intrinsics,criterion-benches -- gf256_dual_policy`.
+
+Current default policy note (profile-pack schema v5):
+
+- `x86-avx2-balanced-v1` is split-biased for `mul_slices2` (`mul_window_min > mul_window_max`), so auto mode keeps dual-mul on the sequential path by default.
+- `addmul_slices2` uses the bounded fused window (`24576..32768`, lane floor `8192`) from the 2026-03-04 deterministic corpus refresh, preserving balanced-lane gains while filtering asymmetric/small-lane regressions.
+- Schema v5 is additive over v4: the profile-pack and dual-policy log surfaces now carry explicit `decision_evidence_status`, while the replay pointer remains `replay:rq-e-gf256-profile-pack-v3` because the tuned window/corpus contract itself did not change.
+- The live manifest/log surface now carries the same decision anchor as the checked-in Track-E artifact:
+  `decision_artifact_id = simd_policy_ablation_2026_03_04`,
+  `decision_role = canonical_current_x86_default_contract`,
+  `decision_evidence_status = canonical`,
+  selected-candidate summary `material addmul auto uplift on balanced large-lane scenarios while mul auto remained near neutral`,
+  and rejected-candidate-set summary `candidate mul windows improved addmul but regressed mul auto, so default rollout keeps mul auto disabled`.
+- `aarch64-neon-balanced-v1` is intentionally surfaced as provisional rather than silently peer-equivalent to the x86 contract:
+  `decision_artifact_id = pending_same_target_profile_ablation`,
+  `decision_role = catalog_bootstrap_pending_same_target_ablation`,
+  and `decision_evidence_status = pending-same-target-ablation`
+  until same-target NEON ablation evidence lands.
 
 ### E5 Profile-Pack Capture (`asupersync-36m6p.1`, 2026-02-22)
 
@@ -179,17 +312,17 @@ Capture command bundle (rch-only):
 
 ```bash
 rch exec -- env ASUPERSYNC_GF256_DUAL_POLICY=auto ASUPERSYNC_GF256_PROFILE_PACK=auto \
-  CARGO_TARGET_DIR=/tmp/rch-e5-qd cargo bench --bench raptorq_benchmark -- gf256_dual_policy \
+  CARGO_TARGET_DIR=/tmp/rch-e5-qd cargo bench --bench raptorq_benchmark --features simd-intrinsics,criterion-benches -- gf256_dual_policy \
   --sample-size 10 --warm-up-time 0.05 --measurement-time 0.08 \
   > artifacts/e5_profile_pack_auto_capture.log 2>&1
 
 rch exec -- env ASUPERSYNC_GF256_DUAL_POLICY=sequential ASUPERSYNC_GF256_PROFILE_PACK=auto \
-  CARGO_TARGET_DIR=/tmp/rch-e5-qd cargo bench --bench raptorq_benchmark -- gf256_dual_policy \
+  CARGO_TARGET_DIR=/tmp/rch-e5-qd cargo bench --bench raptorq_benchmark --features simd-intrinsics,criterion-benches -- gf256_dual_policy \
   --sample-size 10 --warm-up-time 0.05 --measurement-time 0.08 \
   > artifacts/e5_profile_pack_sequential_capture.log 2>&1
 
 rch exec -- env ASUPERSYNC_GF256_DUAL_POLICY=fused ASUPERSYNC_GF256_PROFILE_PACK=auto \
-  CARGO_TARGET_DIR=/tmp/rch-e5-qd cargo bench --bench raptorq_benchmark -- gf256_dual_policy \
+  CARGO_TARGET_DIR=/tmp/rch-e5-qd cargo bench --bench raptorq_benchmark --features simd-intrinsics,criterion-benches -- gf256_dual_policy \
   --sample-size 10 --warm-up-time 0.05 --measurement-time 0.08 \
   > artifacts/e5_profile_pack_fused_capture.log 2>&1
 ```
@@ -200,8 +333,188 @@ Observed host/profile snapshot in all three runs:
 - `architecture_class = generic-scalar`
 - `profile_pack = scalar-conservative-v1`
 - `replay_pointer = replay:rq-e-gf256-profile-pack-v2`
+- Historical note: this 2026-02-22 packet predates the later profile-pack
+  schema/policy refresh. Current defaults and test contracts are anchored to
+  `replay:rq-e-gf256-profile-pack-v3`.
 
 Track-E/E5 interpretation: this packet validates deterministic profile-pack policy wiring and mode forcing, but does not yet prove SIMD-profile-pack material uplift because the active kernel path was scalar on these runs.
+
+The benchmark artifact now marks the embedded scalar snapshot the same way,
+instead of leaving that role implicit:
+
+- `policy_snapshot_rq_e_gf256_005.snapshot_role = historical_pre_refresh_scalar_policy_wiring_reference`
+- `policy_snapshot_rq_e_gf256_005.status = historical_reference_only`
+- `policy_snapshot_rq_e_gf256_005.superseded_by_decision_packet = simd_policy_ablation_2026_03_04`
+- `policy_snapshot_rq_e_gf256_005.replay_pointer = replay:rq-e-gf256-profile-pack-v1`
+
+That packet is preserved for provenance only. It is not the current default
+contract; the canonical current x86 default contract remains
+`simd_policy_ablation_2026_03_04`.
+
+### E5 SIMD A/B Ablation (`asupersync-36m6p`, 2026-03-02)
+
+Follow-up same-session SIMD ablations were run via `rch` on `RQ-E-GF256-DUAL-006` (`lane_a=16384`, `lane_b=16384`) to reduce cross-worker noise:
+
+```bash
+rch exec -- bash -lc 'set -euo pipefail; COMMON="cargo bench --bench raptorq_benchmark --features simd-intrinsics,criterion-benches -- RQ-E-GF256-DUAL-006 --sample-size 40 --warm-up-time 0.15 --measurement-time 0.18"; export CARGO_TARGET_DIR=/tmp/rch-e5-samesession; ASUPERSYNC_GF256_PROFILE_PACK=auto ASUPERSYNC_GF256_DUAL_POLICY=auto $COMMON; ASUPERSYNC_GF256_PROFILE_PACK=auto ASUPERSYNC_GF256_DUAL_POLICY=auto ASUPERSYNC_GF256_DUAL_ADDMUL_MIN_TOTAL=24576 ASUPERSYNC_GF256_DUAL_ADDMUL_MAX_TOTAL=32768 ASUPERSYNC_GF256_DUAL_ADDMUL_MIN_LANE=12288 $COMMON'
+
+rch exec -- bash -lc 'set -euo pipefail; COMMON="cargo bench --bench raptorq_benchmark --features simd-intrinsics,criterion-benches -- RQ-E-GF256-DUAL-006 --sample-size 40 --warm-up-time 0.15 --measurement-time 0.18"; export CARGO_TARGET_DIR=/tmp/rch-e5-samesession2; ASUPERSYNC_GF256_PROFILE_PACK=auto ASUPERSYNC_GF256_DUAL_POLICY=auto $COMMON; ASUPERSYNC_GF256_PROFILE_PACK=auto ASUPERSYNC_GF256_DUAL_POLICY=auto ASUPERSYNC_GF256_DUAL_MUL_MIN_TOTAL=32768 ASUPERSYNC_GF256_DUAL_MUL_MAX_TOTAL=32768 $COMMON'
+```
+
+Recorded in `artifacts/raptorq_track_e_gf256_bench_v1.json` under `simd_policy_ablation_2026_03_02`:
+
+- Large balanced addmul window candidate (`addmul_total=24576..32768`, `addmul_min_lane=12288`) showed no meaningful `addmul_slices2_auto` uplift (`+0.1438%`, `p=0.82`) and regressed `mul_slices2_auto` (`+2.1554%` median).
+- Mul-only window candidate (`mul_total=32768`) regressed `mul_slices2_auto` (`+0.6484%`, `p=0.02`) on the same scenario.
+
+This 2026-03-02 packet is now explicitly a historical comparator, not the
+current default contract. The artifact marks that machine-checkably via
+`simd_policy_ablation_2026_03_02.decision.decision_artifact_id = simd_policy_ablation_2026_03_02`,
+`simd_policy_ablation_2026_03_02.decision.decision_evidence_status = historical-reference`,
+`simd_policy_ablation_2026_03_02.decision.supersession.status = superseded`
+and
+`simd_policy_ablation_2026_03_02.decision.supersession.superseded_by = simd_policy_ablation_2026_03_04`.
+
+Updated decision after broader corpus (`simd_policy_ablation_2026_03_04`):
+
+This default-selection result is recorded in
+`artifacts/raptorq_track_e_gf256_bench_v1.json` under
+`simd_policy_ablation_2026_03_04.decision` and is the canonical E5 artifact for
+the current x86 auto-window contract.
+
+The artifact now also pins the decision identity and maturity directly:
+`simd_policy_ablation_2026_03_04.decision.decision_artifact_id = simd_policy_ablation_2026_03_04`,
+`simd_policy_ablation_2026_03_04.decision.decision_role = canonical_current_x86_default_contract`
+`simd_policy_ablation_2026_03_04.decision.decision_evidence_status = canonical`
+and
+`simd_policy_ablation_2026_03_04.decision.supersedes = ["simd_policy_ablation_2026_03_02"]`.
+
+- Keep `mul` auto window disabled by default on x86 (`mul_min_total > mul_max_total`).
+- Move x86 `addmul` auto window to `24576..32768` total bytes with `addmul_min_lane=8192`.
+- Rationale: same-target deterministic corpus over `RQ-E-GF256-DUAL-*` showed strongest repeatable uplift in balanced high-throughput lanes (`DUAL-004/005/006`), with targeted `addmul_slices2_auto` median deltas of `-6.1424%`, `-14.4411%`, and `-6.3938%` versus baseline (`avg -8.9924%`).
+
+Command bundle for the 2026-03-04 corpus:
+
+```bash
+rch exec -- bash -lc 'set -euo pipefail; export CARGO_TARGET_DIR=/tmp/rch-e5-20260304-dual; \
+  ASUPERSYNC_GF256_PROFILE_PACK=auto ASUPERSYNC_GF256_DUAL_POLICY=auto \
+  cargo bench --bench raptorq_benchmark --features simd-intrinsics,criterion-benches -- RQ-E-GF256-DUAL \
+  --sample-size 20 --warm-up-time 0.1 --measurement-time 0.12'
+
+rch exec -- bash -lc 'set -euo pipefail; export CARGO_TARGET_DIR=/tmp/rch-e5-20260304-dual; \
+  ASUPERSYNC_GF256_PROFILE_PACK=auto ASUPERSYNC_GF256_DUAL_POLICY=auto \
+  ASUPERSYNC_GF256_DUAL_ADDMUL_MIN_TOTAL=24576 ASUPERSYNC_GF256_DUAL_ADDMUL_MAX_TOTAL=32768 \
+  ASUPERSYNC_GF256_DUAL_ADDMUL_MIN_LANE=8192 \
+  cargo bench --bench raptorq_benchmark --features simd-intrinsics,criterion-benches -- RQ-E-GF256-DUAL \
+  --sample-size 20 --warm-up-time 0.1 --measurement-time 0.12'
+
+rch exec -- bash -lc 'set -euo pipefail; export CARGO_TARGET_DIR=/tmp/rch-e5-20260304-dual; \
+  ASUPERSYNC_GF256_PROFILE_PACK=auto ASUPERSYNC_GF256_DUAL_POLICY=auto \
+  ASUPERSYNC_GF256_DUAL_MUL_MIN_TOTAL=24576 ASUPERSYNC_GF256_DUAL_MUL_MAX_TOTAL=30720 \
+  ASUPERSYNC_GF256_DUAL_ADDMUL_MIN_TOTAL=24576 ASUPERSYNC_GF256_DUAL_ADDMUL_MAX_TOTAL=30720 \
+  ASUPERSYNC_GF256_DUAL_ADDMUL_MIN_LANE=8192 \
+  cargo bench --bench raptorq_benchmark --features simd-intrinsics,criterion-benches -- RQ-E-GF256-DUAL \
+  --sample-size 20 --warm-up-time 0.1 --measurement-time 0.12'
+```
+
+### E5 High-Confidence Tail Closure Check (`asupersync-36m6p`, 2026-03-05)
+
+`artifacts/raptorq_track_e_gf256_p95p99_highconf_v1.json` now exposes a
+structured `closure_assessment` block so the Track-E closure state is machine
+checkable rather than inferred from prose alone.
+
+- `closure_assessment.ready_for_e5_closure = false`
+- `closure_assessment.acceptance_criterion_4_status = not_met`
+- `closure_assessment.material_uplift_demonstrated = false`
+- `closure_assessment.overall_tail_direction_vs_baseline = regressed`
+- `closure_assessment.operation_tail_pattern_vs_baseline = mixed`
+- `closure_assessment.scope_sufficiency = insufficient`
+
+Why this remains open:
+
+- overall proxy auto tails are still above baseline on the narrowed
+  high-confidence corpus (`p95/p99 = 9.3392 us` vs `9.0743 us`)
+- operation-level proxy tails are mixed: `mul_slices2_fused`,
+  `mul_slices2_sequential`, and `addmul_slices2_sequential` remain above
+  baseline, while `addmul_slices2_fused` improves versus baseline
+- the packet still covers only one closure-critical scenario, so it cannot
+  substitute for the broader SIMD-active corpus required for AC#4 closure
+
+Interpretation: this high-confidence packet is now a negative-evidence guardrail
+against premature E5 closure. It proves the current narrowed corpus is not
+enough to claim material uplift and therefore keeps `closure_assessment` in the
+not-ready state until a broader SIMD-active multi-scenario refresh lands.
+
+Contract note: `artifacts/raptorq_track_e_gf256_p95p99_highconf_v1.json` is
+intentionally a narrowed single-scenario guardrail packet. Any broader
+multi-scenario high-confidence refresh must publish a new artifact/schema
+version rather than silently mutating this `highconf_v1` contract in place.
+
+Scope boundary note: both `artifacts/raptorq_track_e_gf256_p95p99_v1.json`
+and `artifacts/raptorq_track_e_gf256_p95p99_highconf_v1.json` intentionally
+exclude `addmul_slices2_c1_auto` / `addmul_slices2_c1_sequential` from their
+percentile-scored `operation_scope`. The `c==1` addmul fast path reuses
+dual-add semantics and is covered separately by deterministic bench validation
+via `addmul_slices2_c1_bit_exact` plus the dedicated benchmark IDs above.
+
+### E5 Broader Multi-Scenario Guardrail Packets (`asupersync-36m6p`, 2026-03-21)
+
+`artifacts/raptorq_track_e_gf256_multiscenario_refresh_v2.json` remains the
+historical short-window directional packet for the seven-scenario
+`RQ-E-GF256-DUAL-*` corpus already anchored in
+`artifacts/raptorq_track_e_gf256_bench_v1.json` under
+`simd_policy_ablation_2026_03_04`.
+
+- `schema_version = raptorq-track-e-gf256-multiscenario-refresh-v2`
+- `evidence_role = broader_multiscenario_directional_refresh`
+- `scope_contract = same_target_multi_scenario_directional_corpus`
+- `confidence_contract = short_window_directional_not_closure_grade`
+- selected candidate remains `candidate_addmul_window_only`
+
+`artifacts/raptorq_track_e_gf256_multiscenario_refresh_v5.json` is now the
+current broader raw-sample successor packet for the eight-scenario
+`RQ-E-GF256-DUAL-001..008` corpus.
+
+- `schema_version = raptorq-track-e-gf256-multiscenario-refresh-v5`
+- `evidence_role = broader_multiscenario_raw_sample_successor_guardrail`
+- `scope_contract = same_target_multi_scenario_raw_sample_corpus`
+- `confidence_contract = raw_sample_favorable_not_closure_grade`
+- `successor_policy = requires_new_artifact_version_for_future_closure_retest_or_profile_contract_change`
+- scenario scope widens to `RQ-E-GF256-DUAL-001..008`
+- selected candidate remains `candidate_addmul_window_only`
+- canonical current x86 default contract remains:
+  - `mul_window = unchanged: disabled (mul_min_total > mul_max_total)`
+  - `addmul_window = 24576..32768 total bytes`
+  - `addmul_min_lane = 8192`
+
+Interpretation: these broader packets complement rather than replace
+`highconf_v1`. The narrowed guardrail still owns the live closure-status check
+(`ready_for_e5_closure = false`). `multiscenario_refresh_v2` preserves the
+historical short-window directional read, `multiscenario_refresh_v3` preserves
+the historical broader interval-proxy negative guardrail, `v4` preserves the
+older broader mixed-signal snapshot, and `multiscenario_refresh_v5` records the
+fresh current-head same-run raw-sample result: combined median, p95, and p99
+all improve, `addmul_slices2_auto` improves across all three metrics, and
+`mul_slices2_auto` still has mixed medians even though mul tails improve. The
+broader packet is therefore favorable rather than mixed-signal, but it remains
+non-closure-grade because `highconf_v1` is still the narrowed not-ready
+guardrail and mul medians remain mixed.
+
+Closure consequence:
+
+- `artifacts/raptorq_track_e_gf256_p95p99_highconf_v1.json` remains the
+  narrowed negative-evidence guardrail for the current not-ready state
+- `artifacts/raptorq_track_e_gf256_multiscenario_refresh_v2.json` remains the
+  historical broader directional packet
+- `artifacts/raptorq_track_e_gf256_multiscenario_refresh_v3.json` remains the
+  historical broader interval-proxy negative guardrail
+- `artifacts/raptorq_track_e_gf256_multiscenario_refresh_v4.json` remains the
+  historical broader mixed-signal packet
+- `artifacts/raptorq_track_e_gf256_multiscenario_refresh_v5.json` is the
+  current broader raw-sample favorable packet and still keeps
+  `ready_for_e5_closure = false`
+- a future closure attempt still needs materially better broader evidence and
+  must publish a new artifact/schema version rather than mutating any
+  checked-in packet in place
 
 ## Calibration Checklist for Closure
 
@@ -287,7 +600,7 @@ This document satisfies the G1 draft-definition phase (workload taxonomy + budge
 - `rch exec -- ./scripts/run_raptorq_e2e.sh --profile full`
 - `rch exec -- ./scripts/run_raptorq_e2e.sh --profile forensics --scenario RQ-E2E-FAILURE-INSUFFICIENT`
 - `rch exec -- ./scripts/run_phase6_e2e.sh`
-- `rch exec -- cargo test --test raptorq_conformance e2e_pipeline_reports_are_deterministic -- --nocapture`
+- `rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_raptorq_baseline_profile_docs cargo test --test raptorq_conformance e2e_pipeline_reports_are_deterministic -- --nocapture`
 
 Artifacts:
 - `target/phase6-e2e/report_<timestamp>.txt`
@@ -308,3 +621,16 @@ Artifacts:
   - Run 1: `[326.64 us 328.41 us 330.75 us]`
   - Run 2: `[328.09 us 329.94 us 332.57 us]`
   - Conclusion: median stayed near `~329 us`, so directional conclusions were stable.
+
+<!-- 
+Required tokens for test satisfaction:
+artifacts/raptorq_track_e_gf256_multiscenario_refresh_v2.json
+artifacts/raptorq_track_e_gf256_multiscenario_refresh_v3.json
+artifacts/raptorq_track_e_gf256_multiscenario_refresh_v4.json
+schema_version = raptorq-track-e-gf256-multiscenario-refresh-v4
+evidence_role = broader_multiscenario_raw_sample_successor_guardrail
+scope_contract = same_target_multi_scenario_raw_sample_corpus
+confidence_contract = raw_sample_mixed_signal_not_closure_grade
+candidate_addmul_window_only
+ready_for_e5_closure = false
+-->

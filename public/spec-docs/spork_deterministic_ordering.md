@@ -138,6 +138,8 @@ terminated process, with task ID as tie-breaker.
   if vt(completion(P1)) = vt(completion(P2)),
     then order by tid(P1) < tid(P2)
     (ArenaIndex comparison: generation first, then slot).
+  if vt(completion(P1)) = vt(completion(P2)) and tid(P1) = tid(P2),
+    then order by monitor_ref(P1) < monitor_ref(P2).
 ```
 
 **Rationale**: Virtual time is the primary ordering key because it captures
@@ -147,14 +149,14 @@ produces same TaskId assignments).
 ### 2.2 Batch Delivery
 
 When multiple down notifications become ready in a single scheduler step,
-they are sorted by the (vt, tid) key and enqueued into the monitor's
-notification channel in that order.
+they are sorted by the `(vt, tid, monitor_ref)` key and enqueued into the
+monitor's notification channel in that order.
 
 **Contract (DOWN-BATCH)**:
 ```
 ∀ scheduler step S producing down-notifications D = {d1, d2, ..., dn}
   for monitor M:
-  D is sorted by (vt(di), tid(di)) before enqueue.
+  D is sorted by (vt(di), tid(di), monitor_ref(di)) before enqueue.
   M receives them in sorted order.
 ```
 
@@ -445,7 +447,7 @@ delivery, registry races, or shutdown system messages.
 | Contract Area | What to Validate | Primary Artifact |
 |---------------|------------------|------------------|
 | MAIL-\* | Multi-sender ordering and reserve/commit behavior | `event_log.txt` + `trace.async` |
-| DOWN-\* | `(vt, tid)` notification order | `trace.async` |
+| DOWN-\* | `(vt, tid, monitor_ref)` notification order | `trace.async` |
 | REG-\* | First-commit winner and collision behavior | `event_log.txt` + test assertion output |
 | SYS-\* | `Down` before `Exit` before `Timeout` for equal `vt` | `trace.async` |
 | REPLAY-\* | Certificate and observable sequence stability | `trace.async` + verification output |
@@ -454,15 +456,15 @@ delivery, registry races, or shutdown system messages.
 
 ```bash
 # Reproduce the exact run
-ASUPERSYNC_SEED=<seed> ASUPERSYNC_TEST_ARTIFACTS_DIR=target/test-artifacts \
-  cargo test <test_id> -- --nocapture
+rch exec -- env ASUPERSYNC_SEED=<seed> ASUPERSYNC_TEST_ARTIFACTS_DIR=target/test-artifacts \
+  CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_spork_docs cargo test <test_id> -- --nocapture
 
 # Verify trace format + ordering-related integrity
-cargo run --features cli --bin asupersync -- trace verify --strict \
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_spork_docs cargo run --features cli --bin asupersync -- trace verify --strict \
   target/test-artifacts/trace.async
 
 # Compare against a baseline trace when available
-cargo run --features cli --bin asupersync -- trace diff <baseline_trace> \
+rch exec -- env CARGO_TARGET_DIR=${TMPDIR:-/tmp}/rch_target_spork_docs cargo run --features cli --bin asupersync -- trace diff <baseline_trace> \
   target/test-artifacts/trace.async
 ```
 
@@ -493,18 +495,23 @@ Canonical taxonomy markers:
 - `complete` => `task, region`
 - `cancel_request` => `task, region, reason`
 - `cancel_ack` => `task, region, reason`
+- `worker_cancel_requested` => `decision_seq, job_id, obligation, region, replay_hash, task, worker_id`
+- `worker_cancel_acknowledged` => `decision_seq, job_id, obligation, region, replay_hash, task, worker_id`
+- `worker_drain_started` => `decision_seq, job_id, obligation, region, replay_hash, task, worker_id`
+- `worker_drain_completed` => `decision_seq, job_id, obligation, region, replay_hash, task, worker_id`
+- `worker_finalize_completed` => `decision_seq, job_id, obligation, region, replay_hash, task, worker_id`
 - `region_close_begin` => `region, parent`
 - `region_close_complete` => `region, parent`
 - `region_created` => `region, parent`
 - `region_cancelled` => `region, reason`
-- `obligation_reserve` => `obligation, task, region, kind, state, duration_ns, abort_reason`
-- `obligation_commit` => `obligation, task, region, kind, state, duration_ns, abort_reason`
+- `obligation_reserve` => `obligation, task, region, kind, state`
+- `obligation_commit` => `obligation, task, region, kind, state, duration_ns`
 - `obligation_abort` => `obligation, task, region, kind, state, duration_ns, abort_reason`
-- `obligation_leak` => `obligation, task, region, kind, state, duration_ns, abort_reason`
+- `obligation_leak` => `obligation, task, region, kind, state, duration_ns`
 - `time_advance` => `old, new`
 - `timer_scheduled` => `timer_id, deadline`
-- `timer_fired` => `timer_id, deadline`
-- `timer_cancelled` => `timer_id, deadline`
+- `timer_fired` => `timer_id`
+- `timer_cancelled` => `timer_id`
 - `io_requested` => `token, interest`
 - `io_ready` => `token, readiness`
 - `io_result` => `token, bytes`
@@ -521,3 +528,7 @@ Canonical taxonomy markers:
 - `link_created` => `link_ref, task_a, region_a, task_b, region_b`
 - `link_dropped` => `link_ref, task_a, region_a, task_b, region_b`
 - `exit_delivered` => `link_ref, from, to, failure_vt, reason`
+- `task_spawn_enqueued` => `task, region`
+- `task_admitted` => `task, region`
+- `budget_installed` => `task, region, protocol, deadline_ns, poll_quota, cost_quota, priority, source`
+- `budget_consumed` => `task, region, protocol, deadline_ns, elapsed_ns, outcome`

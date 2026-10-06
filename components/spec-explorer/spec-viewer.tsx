@@ -7,7 +7,7 @@ import { ColumnDef, getCoreRowModel, getFilteredRowModel, useReactTable } from "
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FileText, ChevronRight, ArrowLeft, Loader2, AlertCircle,
-  BookOpen, Shield, Beaker, Wrench, Code2, Network, FlaskConical,
+  BookOpen, Shield, Beaker, Wrench, Code2, Network, FlaskConical, Rocket,
 } from "lucide-react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
@@ -19,10 +19,11 @@ import { Magnetic } from "@/components/motion-wrapper";
 import SpecSearch from "./spec-search";
 
 const categoryIcons: Record<SpecCategory, React.ComponentType<{ className?: string }>> = {
+  "Start Here": Rocket,
   "Formal Semantics": BookOpen,
   "Testing": Beaker,
   "Security": Shield,
-  "RaptorQ": Network,
+  "RaptorQ & ATP": Network,
   "Spork": FlaskConical,
   "Operations": Wrench,
   "Development": Code2,
@@ -39,6 +40,29 @@ type SidebarItem =
   | { id: string; type: "heading"; category: SpecCategory }
   | { id: string; type: "doc"; category: SpecCategory; doc: SpecDoc };
 
+const UPSTREAM_BLOB = "https://github.com/Dicklesworthstone/asupersync/blob/main/";
+
+// The docs are mirrored from the upstream repo, where they live under docs/
+// (the formal semantics sit at the repo root). Their relative links point at
+// source files and sibling docs in that tree, so resolve them against GitHub.
+function rewriteRelativeLinks(html: string, filename: string): string {
+  const base = filename === "asupersync_v4_formal_semantics.md" ? UPSTREAM_BLOB : `${UPSTREAM_BLOB}docs/`;
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  for (const anchor of template.content.querySelectorAll<HTMLAnchorElement>("a[href]")) {
+    const href = anchor.getAttribute("href") ?? "";
+    if (href.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(href)) continue;
+    try {
+      anchor.setAttribute("href", new URL(href, base).toString());
+      anchor.setAttribute("target", "_blank");
+      anchor.setAttribute("rel", "noopener noreferrer");
+    } catch {
+      // Leave malformed hrefs untouched.
+    }
+  }
+  return template.innerHTML;
+}
+
 async function loadSpecDocHtml(filename: string, signal?: AbortSignal): Promise<string> {
   const res = await fetch(`/spec-docs/${filename}`, { signal });
   if (!res.ok) {
@@ -47,7 +71,7 @@ async function loadSpecDocHtml(filename: string, signal?: AbortSignal): Promise<
 
   const text = await res.text();
   const html = await marked.parse(text);
-  return DOMPurify.sanitize(html);
+  return rewriteRelativeLinks(DOMPurify.sanitize(html), filename);
 }
 
 export default function SpecViewer() {

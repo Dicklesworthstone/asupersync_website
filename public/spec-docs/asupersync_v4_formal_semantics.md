@@ -10,6 +10,69 @@ This document defines the operational semantics of Asupersync 4.0 in a style sui
 3. Translation to TLA+ for model checking
 4. Reasoning about correctness without excessive formalism
 
+### Normative Classification
+
+Sections are **normative** by default unless their heading carries one of these
+classification markers:
+
+- `[Explanatory]`: intuition, proof sketches, and background that do not by
+  themselves define runtime behavior.
+- `[Implementation]`: implementation mapping, verifier contracts, or tooling
+  interfaces that bind the semantics to concrete Rust/test artifacts.
+
+### Canonical Rule Index
+
+The canonical rule IDs are included here in the stable numbering used by the
+semantic contract, runtime gap matrix, and docs lints:
+
+- `rule.cancel.request` (#1)
+- `rule.cancel.acknowledge` (#2)
+- `rule.cancel.drain` (#3)
+- `rule.cancel.finalize` (#4)
+- `inv.cancel.idempotence` (#5)
+- `inv.cancel.propagates_down` (#6)
+- `def.cancel.reason_kinds` (#7)
+- `def.cancel.severity_ordering` (#8)
+- `prog.cancel.drains` (#9)
+- `rule.cancel.checkpoint_masked` (#10)
+- `inv.cancel.mask_bounded` (#11)
+- `inv.cancel.mask_monotone` (#12)
+- `rule.obligation.reserve` (#13)
+- `rule.obligation.commit` (#14)
+- `rule.obligation.abort` (#15)
+- `rule.obligation.leak` (#16)
+- `inv.obligation.no_leak` (#17)
+- `inv.obligation.linear` (#18)
+- `inv.obligation.bounded` (#19)
+- `inv.obligation.ledger_empty_on_close` (#20)
+- `prog.obligation.resolves` (#21)
+- `rule.region.close_begin` (#22)
+- `rule.region.close_cancel_children` (#23)
+- `rule.region.close_children_done` (#24)
+- `rule.region.close_run_finalizer` (#25)
+- `rule.region.close_complete` (#26)
+- `inv.region.quiescence` (#27)
+- `prog.region.close_terminates` (#28)
+- `def.outcome.four_valued` (#29)
+- `def.outcome.severity_lattice` (#30)
+- `def.outcome.join_semantics` (#31)
+- `def.cancel.reason_ordering` (#32)
+- `inv.ownership.single_owner` (#33)
+- `inv.ownership.task_owned` (#34)
+- `def.ownership.region_tree` (#35)
+- `rule.ownership.spawn` (#36)
+- `comb.join` (#37)
+- `comb.race` (#38)
+- `comb.timeout` (#39)
+- `inv.combinator.loser_drained` (#40)
+- `law.race.never_abandon` (#41)
+- `law.join.assoc` (#42)
+- `law.race.comm` (#43)
+- `inv.capability.no_ambient` (#44)
+- `def.capability.cx_scope` (#45)
+- `inv.determinism.replayable` (#46)
+- `def.determinism.seed_equivalence` (#47)
+
 ---
 
 ## 1. Domains
@@ -43,12 +106,21 @@ When combining outcomes, **worst wins** (monotone aggregation).
 ```
 CancelReason ::= { kind: CancelKind, message: Option<String> }
 
-CancelKind ::= User | Timeout | FailFast | ParentCancelled | Shutdown
+CancelKind ::=
+  | User
+  | Timeout | Deadline
+  | PollQuota | CostBudget
+  | FailFast | RaceLost | LinkedExit
+  | ParentCancelled | ResourceUnavailable
+  | Shutdown
 
-Severity: User < Timeout < FailFast < ParentCancelled < Shutdown
+Severity tiers (total order):
+  User(0) < Timeout=Deadline(1) < PollQuota=CostBudget(2)
+         < FailFast=RaceLost=LinkedExit(3)
+         < ParentCancelled=ResourceUnavailable(4) < Shutdown(5)
 ```
 
-### 1.4 Budgets
+### 1.4 Budgets [Explanatory]
 
 Product semiring with componentwise min (except priority: max):
 
@@ -75,8 +147,8 @@ TaskState ::=
   | Created
   | Running
   | CancelRequested(reason, cleanup_budget)
-  | Cancelling(cleanup_budget)
-  | Finalizing(cleanup_budget)
+  | Cancelling(reason, cleanup_budget)
+  | Finalizing(reason, cleanup_budget)
   | Completed(outcome)
 ```
 
@@ -98,7 +170,7 @@ ObligationState ::= Reserved | Committed | Aborted | Leaked
 ObligationKind  ::= SendPermit | Ack | Lease | IoOp
 ```
 
-### 1.8 Trace labels, independence, and true concurrency
+### 1.8 Trace labels, independence, and true concurrency [Explanatory]
 
 Small-step semantics is written as interleavings, but Asupersync’s *spec* is intentionally stronger:
 many interleavings are observationally the same because they differ only by reordering **independent** actions.
@@ -135,7 +207,9 @@ Two traces are equivalent (`~`) when they are related by a finite sequence of ad
 Asupersync’s “observational equivalence” (`≃`) is intended to respect this quotient:
 we care about equivalence classes (partial orders), not raw interleavings.
 
-This is the semantic backbone for “optimal DPOR” and stable trace replay (§8).
+This is the semantic backbone for the **optimal-DPOR design target** and stable
+trace replay (§8). It does not by itself establish that the current explorer
+implements an optimal-DPOR algorithm.
 
 ### 1.9 Linear resources (obligations) as a discipline
 
@@ -150,7 +224,7 @@ Held(t) = { o ∈ dom(O) | O[o].holder = t ∧ O[o].state = Reserved }
 The intended rule is: reaching `Completed(_)` with `Held(t) ≠ ∅` is a semantic error (a leak).
 The operational rule `LEAK` below is the runtime witness of this linearity violation.
 
-### 1.10 (Optional extension) Distributed time as causal partial order
+### 1.10 Distributed time [Explanatory] (optional causal partial order extension)
 
 For distributed structured concurrency, traces should be **causally ordered**, not totally ordered.
 A standard representation is a vector clock:
@@ -163,7 +237,7 @@ e1 ∥ e2  iff  neither VC(e1) ≤ VC(e2) nor VC(e2) ≤ VC(e1)
 
 This lets remote traces remain honest: concurrent events stay unordered until causality forces an order.
 
-### 1.11 Scheduler lanes (priority model)
+### 1.11 Scheduler lanes [Implementation] (priority model)
 
 Asupersync scheduling is modeled as **three priority lanes**:
 
@@ -184,50 +258,7 @@ lane(t) =
 Timed lane ordering is Earliest-Deadline-First (EDF). When deadlines tie,
 deterministic task-id ordering breaks ties.
 
-### 1.12 Scheduler fairness bound (implementation model)
-
-The implementation uses a **per-worker cancel streak counter** to bound
-starvation of timed/ready work while preserving cancel preemption.
-Let `k >= 1` be `cancel_streak_limit`, and let `cancel_streak` track the
-consecutive number of cancel dispatches for a worker.
-
-Dispatch model (per worker):
-
-```
-if cancel_lane nonempty and cancel_streak < k:
-  dispatch cancel; cancel_streak += 1
-else:
-  dispatch timed if available, else ready (or steal)
-  cancel_streak := 0
-
-// fallback: if cancel_streak >= k but no timed/ready work exists,
-// dispatch one cancel task and set cancel_streak := 1
-```
-
-Under `DrainObligations` / `DrainRegions` scheduling suggestions, the effective
-limit is `2k` (cancel streak is allowed to grow to `2 * k` before yielding).
-
-**Bounded starvation guarantee (per worker):**
-If timed/ready work is continuously available, it is dispatched within at most
-`k` cancel dispatches (or `2k` under drain suggestions). The fallback path only
-activates when timed/ready work is absent, preserving liveness for cancel-only
-loads.
-
-**Proof sketch:**
-1. `cancel_streak` increments only on cancel dispatches and resets to 0 on any
-   timed/ready/steal dispatch or after idle backoff.
-2. When `cancel_streak` reaches the effective limit and timed/ready work exists,
-   the scheduler bypasses cancel work and dispatches timed/ready next, resetting
-   the streak.
-3. The fallback cancel dispatch is only reachable when timed/ready/steal are empty,
-   so it does not delay available lower-priority work.
-
-**Test harness:**
-See `tests/scheduler_lane_fairness.rs` and the preemption tests in
-`src/runtime/scheduler/three_lane.rs` (e.g., `test_preemption_max_streak_bounded_by_limit`,
-`test_preemption_fairness_yield_under_cancel_flood`) for empirical confirmation.
-
-### 1.13 Derived predicates (definitions)
+### 1.12 Derived predicates (definitions)
 
 We will use the following derived predicates:
 
@@ -336,6 +367,8 @@ label ::= τ                        // Silent/internal
         | finalize(r, f)
         | close(r, outcome)
         | tick
+        | dedup(key)
+        | compensate(saga)
 ```
 
 ---
@@ -350,7 +383,7 @@ Task readiness is abstracted by `is_ready(t)` (e.g., a waker fires or a poll yie
 ```
 Preconditions:
   is_ready(t)
-  T[t].state ∈ {Created, Running, CancelRequested(_), Cancelling(_), Finalizing(_)}
+  T[t].state ∈ {Created, Running, CancelRequested(_), Cancelling(_, _), Finalizing(_, _)}
 
 Σ —[τ]→ Σ' where:
   S'[lane(t)].push(t)
@@ -370,6 +403,79 @@ Preconditions:
 
 If `t` yields, it is re-enqueued via `ENQUEUE`. If `t` completes, it is not re-enqueued.
 This captures the lane priority model without committing to a specific queue implementation.
+
+##### Scheduler fairness [Explanatory]
+
+We model the three-lane scheduler with explicit **cancel fairness** via a streak
+counter, matching `src/runtime/scheduler/three_lane.rs`.
+
+State:
+
+- `C`, `T`, `R`: cancel, timed (EDF-ordered), and ready queues
+- `cancel_streak : Nat` (number of consecutive cancel dispatches)
+- `L : Nat` (fairness limit; `cancel_streak_limit`)
+- `suggestion : {MeetDeadlines, DrainObligations, DrainRegions, NoPreference}`
+
+Pseudo-code:
+
+```
+pick_next(S):
+  if suggestion = MeetDeadlines then
+     if due(T) ≠ ∅ then return pop_timed(T) and cancel_streak := 0
+     else if cancel_streak < L and C ≠ ∅ then pop_cancel(C), cancel_streak++
+     else if cancel_streak ≥ L then fairness_yield++
+  else if suggestion ∈ {DrainObligations, DrainRegions} then
+     let L' = 2 * L
+     if cancel_streak < L' and C ≠ ∅ then pop_cancel(C), cancel_streak++
+     else if cancel_streak ≥ L' then fairness_yield++
+     if due(T) ≠ ∅ then pop_timed(T), cancel_streak := 0
+  else // NoPreference
+     if cancel_streak < L and C ≠ ∅ then pop_cancel(C), cancel_streak++
+     else if cancel_streak ≥ L then fairness_yield++
+     if due(T) ≠ ∅ then pop_timed(T), cancel_streak := 0
+
+  if R ≠ ∅ then pop_ready(R), cancel_streak := 0
+  else if stealable_ready ≠ ∅ then pop_ready(steal), cancel_streak := 0
+  else if cancel_streak ≥ effective_limit and C ≠ ∅ then
+       // fallback cancel: no non-cancel work available
+       pop_cancel(C), cancel_streak := 1
+  else none
+```
+
+Bounded fairness lemma (scheduler):
+
+> If `cancel_streak_limit = L`, and a non-cancel task (ready or due-timed)
+> remains continuously enabled, then within at most `L + 1` dispatch steps
+> the scheduler selects a non-cancel task (or `2L + 1` when `Drain*` suggests
+> boosted cancellation). This follows from the guard `cancel_streak < L` (or `< 2L`)
+> and the mandatory ready/timed checks after each fairness yield.
+
+Proof sketch (scheduler fairness):
+
+- Define “continuously enabled” as: a ready task in `R` or a due-timed task in `T`
+  remains present across dispatch steps (no completion/removal) and the scheduler
+  is not halted.
+- Each cancel dispatch increments `cancel_streak` by 1 and can occur only while
+  `cancel_streak < L` (or `< 2L` under Drain*).
+- When `cancel_streak` reaches the limit, the next `pick_next` must check timed/ready
+  before any further cancel dispatch (fairness yield), so an enabled non-cancel
+  task is selected within at most `L + 1` steps (or `2L + 1`).
+- The fallback cancel path only occurs when no non-cancel work is available,
+  preserving the lemma’s premise.
+
+Code alignment (ThreeLaneScheduler::next_task):
+
+- `MeetDeadlines` branch:
+  1. `try_timed_work()` (EDF + due check) matches `if due(T) ≠ ∅ then pop_timed(T)`.
+  2. `cancel_streak < L` gating `try_cancel_work()` matches the guarded cancel dispatch.
+  3. Fairness yield increments map to `preemption_metrics.fairness_yields`.
+- `DrainObligations` / `DrainRegions` branch:
+  - Uses `boosted_limit = 2 * L` and otherwise the same structure; aligns with `L' = 2 * L`.
+- `NoPreference` branch:
+  - Cancel then timed with the same streak guard, matching the default lane ordering.
+- Common tail:
+  - `try_ready_work()` then `try_steal()` correspond to `R ≠ ∅` and `stealable_ready ≠ ∅`.
+  - Fallback cancel when no non-cancel work exists corresponds to the final `effective_limit` clause.
 
 ### 3.1 Task Lifecycle
 
@@ -489,14 +595,14 @@ Under fair scheduling and **sufficient cleanup budgets**, every task that enters
 Therefore, cancellation completes in a bounded number of steps assuming budgets
 cover required cleanup and finalizers are themselves terminating.
 
-#### 3.2.4 Mapping to runtime transitions
+#### 3.2.4 Mapping to runtime transitions [Implementation]
 
 The semantic states correspond directly to runtime records:
 
 ```
 TaskState::CancelRequested  ↔  CancelRequested(reason, cleanup_budget)
-TaskState::Cancelling       ↔  Cancelling(cleanup_budget)
-TaskState::Finalizing       ↔  Finalizing(cleanup_budget)
+TaskState::Cancelling       ↔  Cancelling(reason, cleanup_budget)
+TaskState::Finalizing       ↔  Finalizing(reason, cleanup_budget)
 Outcome::Cancelled(reason)  ↔  Completed(Cancelled(reason))
 ```
 
@@ -523,15 +629,15 @@ Running:
 
 CancelRequested:
   on Request(r) -> CancelRequested(strengthen(reason, r), tighten(budget, r))
-  on Checkpoint when mask = 0 -> Cancelling(budget)
+  on Checkpoint when mask = 0 -> Cancelling(reason, budget)
   on Checkpoint when mask > 0 -> CancelRequested(reason, budget) with mask := mask - 1
 
 Cancelling:
-  on Request(r) -> Cancelling(tighten(budget, r))   // reason strengthens, budget tightens
-  on CleanupDone -> Finalizing(budget)
+  on Request(r) -> Cancelling(strengthen(reason, r), tighten(budget, r))
+  on CleanupDone -> Finalizing(reason, budget)
 
 Finalizing:
-  on Request(r) -> Finalizing(tighten(budget, r))
+  on Request(r) -> Finalizing(strengthen(reason, r), tighten(budget, r))
   on FinalizersDone -> Completed(Cancelled(reason))
 ```
 
@@ -581,7 +687,7 @@ Preconditions:
   T[t].cont = await(checkpoint)
 
 Σ —[τ]→ Σ' where:
-  T'[t].state = Cancelling(budget)
+  T'[t].state = Cancelling(reason, budget)
   T'[t].cont = resume(T[t].cont, Cancelled(reason))
 ```
 
@@ -601,7 +707,7 @@ Preconditions:
 Masking is never “free”: it consumes a finite mask budget.
 Primitives that use masking must account for it explicitly (via budgets/policy) so cancellation has a quantitative bound.
 
-#### Game-theoretic view (spec): cancellation as an adversarial, budgeted protocol
+#### Game-theoretic view [Explanatory]: cancellation as an adversarial, budgeted protocol
 
 For reasoning (and eventually mechanized proofs), it is useful to interpret cancellation as a two-player, quantitative game:
 
@@ -616,18 +722,18 @@ This perspective turns “bounded masking” into a mathematical promise: if eve
 
 ```
 Preconditions:
-  T[t].state = Cancelling(_)
+  T[t].state = Cancelling(reason, _)
   T[t].cont ∈ {done(_), cancelled}
 
 Σ —[τ]→ Σ' where:
-  T'[t].state = Finalizing(default_finalizer_budget)
+  T'[t].state = Finalizing(reason, default_finalizer_budget)
 ```
 
 #### CANCEL-FINALIZE — Task runs local finalizers
 
 ```
 Preconditions:
-  T[t].state = Finalizing(_)
+  T[t].state = Finalizing(_, _)
   // All task-local cleanup done
 
 Σ —[complete(t, Cancelled(reason))]→ Σ' where:
@@ -779,7 +885,7 @@ Then:
 
 This provides simple linear invariants and fast trace checks for “no leaks.”
 
-#### 3.4.1 Linear logic view (affine, single-use tokens)
+#### 3.4.1 Linear logic view [Explanatory] (affine, single-use tokens)
 
 We model obligations as **linear resources** in a judgmental style:
 
@@ -820,7 +926,7 @@ LEAK:
 This matches the runtime behavior: uncommitted obligations are detected and reported
 when a task completes.
 
-#### 3.4.2 Mapping to runtime state
+#### 3.4.2 Mapping to runtime state [Implementation]
 
 The linear context `Δ` is *represented concretely* by the obligation registry `O`:
 
@@ -836,7 +942,7 @@ Transitions in §3.4 correspond directly to mutations of `O`:
 
 This is the concrete embedding of linear logic into the runtime’s operational state.
 
-#### 3.4.3 Mapping to oracles and tests
+#### 3.4.3 Mapping to oracles [Implementation] and tests
 
 The lab runtime’s **ObligationLeakOracle** and trace checks implement the same rule:
 
@@ -904,7 +1010,7 @@ to survive task completion.)
 This lemma underpins the lab-runtime oracle: when the oracle reports no leaks,
 region close is safe w.r.t. obligations.
 
-#### 3.4.6 No silent drop (safety theorem, sketch)
+#### 3.4.6 No silent drop [Explanatory] (safety theorem, sketch)
 
 **Theorem (No Silent Drop):** For any obligation `o`, the system records
 either `commit(o)` or `abort(o)` **before** the holder task completes,
@@ -996,6 +1102,185 @@ Preconditions:
 
 ---
 
+### 3.7 Remote Idempotency + Saga Semantics (distributed extensions)
+
+We model two distributed extensions used by remote tasks:
+
+1. **Idempotency store** for deduplicating spawn requests.
+2. **Saga** for compensation-ordered rollback.
+
+These are expressed as a small state machine that can be used in model checking
+and for the lab-runtime test harness.
+
+#### 3.7.1 Idempotency Store
+
+Let:
+
+```
+k ∈ IdempotencyKey = {0,1}^128
+rt ∈ RemoteTaskId  = ℕ
+cn ∈ ComputationName = String
+ri ∈ RemoteInput = Bytes
+fp ∈ IdempotencyRequestFingerprint = (cn, ri)
+```
+
+Define the idempotency store state:
+
+```
+D: IdempotencyKey → IdempotencyRecord
+
+IdempotencyRecord = {
+  key: k,
+  remote_task_id: rt,
+  request: fp,
+  created_at: τ,
+  expires_at: Option<τ>,
+  outcome: Option<RemoteOutcome>
+}
+```
+
+Define a terminal record as expired only after its completion-relative
+retention deadline:
+
+```
+terminal_expired(rec, τ_now) ≜
+  rec.outcome ≠ None ∧
+  rec.expires_at = Some(τ_expiry) ∧
+  τ_now ≥ τ_expiry
+```
+
+Admission is one state transition. Returning `New` also reserves the key for
+the canonical task; there is no observable check/record gap:
+
+```
+ADMIT-NEW:
+  k ∉ dom(D) ∨ (k ∈ dom(D) ∧ terminal_expired(D[k], τ_now))
+  --------------------------------------------------------
+  D' = D[k ↦ { key = k, remote_task_id = rt, request = fp,
+               created_at = τ_now, expires_at = None, outcome = None }]
+  decision = New
+
+DEDUP-DUPLICATE:
+  k ∈ dom(D) ∧ ¬terminal_expired(D[k], τ_now) ∧ D[k].request = fp
+  -----------------------------------------------------------------
+  D' = D
+  decision = Duplicate(D[k])
+
+DEDUP-CONFLICT:
+  k ∈ dom(D) ∧ ¬terminal_expired(D[k], τ_now) ∧ D[k].request ≠ fp
+  -----------------------------------------------------------------
+  D' = D
+  decision = Conflict
+```
+
+Completion establishes the finite retention window; insertion does not:
+
+```
+RECORD-COMPLETE:
+  k ∈ dom(D) ∧ D[k].remote_task_id = rt
+  --------------------------------------------------------------
+  D' = D[k ↦ D[k] with {
+         outcome = Some(outcome),
+         expires_at = Some(τ_now + ttl) }]
+  updated = true
+
+RECORD-COMPLETE-REJECT:
+  k ∉ dom(D) ∨ (k ∈ dom(D) ∧ D[k].remote_task_id ≠ rt)
+  ----------------------------------------------------------
+  D' = D
+  updated = false
+```
+
+The `expires_at = None` in `ADMIT-NEW` is load-bearing: an in-flight operation
+cannot outlive its deduplication record. [`IdempotencyStore::check_and_record`](src/remote.rs)
+implements the admission transition atomically. `RECORD-COMPLETE` sets both
+the outcome and its retention deadline from the logical completion time. The
+canonical task-ID premise rejects a delayed completion from an expired record's
+previous generation after the same key has been admitted again.
+
+Eviction (explicit bulk sweep, plus lazy replacement on admission):
+
+```
+EVICT:
+  D' = { (k ↦ rec) ∈ D |
+         rec.outcome = None ∨
+         rec.expires_at = None ∨
+         (rec.expires_at = Some(τ_expiry) ∧ τ_now < τ_expiry) }
+```
+
+Operational consequence:
+- An in-flight record is never TTL-evicted, so a retry cannot start a second
+  live execution merely because the operation runs longer than `ttl`.
+- A duplicate request with the same key and fingerprint must retain the
+  **canonical** `remote_task_id` internally; the protocol acknowledgement is
+  correlated to the current delivery attempt while it attaches to the
+  canonical task in-flight or returns the cached terminal `outcome` after
+  completion.
+- A conflicting request with the same key but a different fingerprint is
+  rejected while the record is retained.
+- A terminal record becomes reusable only at its completion-relative deadline.
+- A completion whose task ID does not match the current record generation is
+  rejected without changing the record.
+- The guarantee is scoped to the store lifetime and terminal retention window;
+  it is not durable across store reset or terminal-record eviction.
+
+#### 3.7.2 Saga Compensation Ordering
+
+Let a saga state be:
+
+```
+Saga = {
+  state: Running | Completed | Compensating | Aborted,
+  compensations: List<Compensation>,  // forward order
+  completed_steps: ℕ
+}
+```
+
+Transition rules:
+
+```
+SAGA-STEP-OK:
+  saga.state = Running
+  action(step) = Ok(value)
+  --------------------------------
+  saga' = saga with
+    compensations = compensations ++ [comp(step)],
+    completed_steps = completed_steps + 1
+
+SAGA-STEP-FAIL:
+  saga.state = Running
+  action(step) = Err(msg)
+  --------------------------------
+  saga' = run_compensations_reverse(saga)
+  saga'.state = Aborted
+
+SAGA-ABORT:
+  saga.state = Running
+  --------------------------------
+  saga' = run_compensations_reverse(saga)
+  saga'.state = Aborted
+
+SAGA-COMPLETE:
+  saga.state = Running
+  --------------------------------
+  saga'.state = Completed
+```
+
+Compensation order is **reverse** (LIFO) and deterministic:
+
+```
+run_compensations_reverse([c1, c2, ..., cn]) executes cn, ..., c2, c1
+```
+
+Invariant (safety):
+- Each step's compensation executes at most once.
+- If a saga aborts, all completed steps are compensated in reverse order.
+
+Invariant (determinism):
+- Given the same step outcomes, the compensation sequence is identical.
+
+---
+
 ## 4. Derived Combinators
 
 Combinators are defined in terms of primitives:
@@ -1020,12 +1305,48 @@ race(r, f1, f2) =
   t1 ← spawn(r, f1)
   t2 ← spawn(r, f2)
   (winner, loser) ← select_first(t1, t2)
-  cancel(loser)
+  cancel(loser, RaceLost)
   await(loser)              // IMPORTANT: drain loser
   return winner.outcome
 ```
 
 **Critical invariant**: losers are always drained, never abandoned.
+
+**Cancellation attribution**: the loser is cancelled with `CancelKind::RaceLost`
+unless a stronger reason is already present (e.g., parent cancellation).
+
+#### Lemma L-LOSER-DRAINED (Race)
+
+Let `race(r, f1, f2)` evaluate in state `Σ` to a value `v` in state `Σ'`.
+Let `t1, t2` be the tasks spawned for `f1, f2`, with `tW` the winner and `tL` the loser.
+Then:
+
+```
+T'[tW].state = Completed(oW)
+T'[tL].state = Completed(oL)
+oL = Cancelled(RaceLost) or oL is Cancelled(r) with r ⪰ RaceLost
+```
+
+Moreover, all tasks in the race’s subregion are completed (quiescent) when
+`race` returns.
+
+*Proof sketch*: `select_first` ensures one task reaches `Completed`. The other
+is cancelled via `CANCEL-REQUEST(RaceLost)` and awaited; `await` returns only
+after terminal completion. Quiescence of the race subregion follows from
+`INV-QUIESCENCE` and ownership of all spawned children by `r`.
+
+#### Alignment Notes (Implementation)
+
+- `Scope::race` and `Scope::race_all` in `src/cx/scope.rs` use
+  `join_with_drop_reason(CancelReason::race_loser())`, then explicitly
+  `abort_with_reason(RaceLost)` and `join` to drain losers.
+- `JoinFuture::drop` in `src/runtime/task_handle.rs` aborts a task when the join
+  future is dropped, preserving race safety even under early drops.
+- `src/combinator/race.rs` and `src/combinator/join.rs` document the same
+  loser-drain and “no abandonment” invariants; `src/combinator/timeout.rs`
+  defines timeout in terms of `race`.
+- `CancelKind::RaceLost` is defined in `src/types/cancel.rs` with the same
+  severity as `FailFast`.
 
 ### 4.3 timeout(duration, f)
 
@@ -1091,7 +1412,7 @@ progress (eventual closure) is handled separately in §6.
 ```
 ∀o ∈ dom(O):
   O[o].state = Reserved ⟹
-    T[O[o].holder].state ∈ {Running, CancelRequested(_), Cancelling(_), Finalizing(_)}
+    T[O[o].holder].state ∈ {Running, CancelRequested(_), Cancelling(_, _), Finalizing(_, _)}
 ```
 
 ### INV-OBLIGATION-LINEAR: Obligations resolve at most once
@@ -1144,7 +1465,7 @@ After race(f1, f2) returns:
   t ∈ S.ready_lane   ⇒ lane(t) = Ready
 ```
 
-### Meta: Compositional specs (separation + rely/guarantee)
+### Meta: Compositional specs [Explanatory] (separation + rely/guarantee)
 
 The invariants above are global; in practice we want *local* reasoning that composes.
 A standard approach is:
@@ -1164,33 +1485,48 @@ This is the natural formal home for “structured concurrency is local reasoning
 
 ## 6. Progress Properties
 
-Under fair scheduling:
+These are conditional liveness properties, not consequences of fairness alone.
+Fairness applies to runnable tasks; it cannot make a nonreturning poll finish,
+create a missing wake, end an arbitrary mask body, or complete withheld I/O.
+Each implication below assumes finite admitted work and the stated progress
+premises. Runtime budgets and watchdogs do not prove those premises.
 
 ### PROG-TASK: Tasks eventually terminate
 
 ```
-T[t].state ∈ {Created, Running} ∧ fair
+T[t].state ∈ {Created, Running} ∧ fair ∧ finite_work(t)
+  ∧ returning_polls(t) ∧ eventual_required_wakes(t)
   ⟹ eventually T[t].state = Completed(_)
 ```
 
 ### PROG-CANCEL: Cancelled tasks drain
 
 ```
-T[t].state = CancelRequested(_) ∧ fair
-  ⟹ eventually T[t].state = Completed(Cancelled(_))
+T[t].state = CancelRequested(_) ∧ fair ∧ returning_polls(t)
+  ∧ eventual_required_wakes(t) ∧ eventual_cancel_checkpoint(t)
+  ∧ masks_eventually_end(t) ∧ finite_progressing_cleanup(t)
+  ⟹ eventually T[t].state = Completed(_)
 ```
+
+The terminal outcome follows the runtime's canonical outcome rules. A prior
+result or cleanup panic can affect that outcome; requesting cancellation does
+not by itself prove `Completed(Cancelled(_))`. Primitive acknowledgement bounds
+in `cancel::ResponsivenessRegistry` do not establish whole-task cleanup bounds.
 
 ### PROG-REGION: Closing regions close
 
 ```
-R[r].state = Closing ∧ fair
+R[r].state = Closing ∧ fair ∧ finite_admitted_work(r)
+  ∧ all_children_eventually_complete(r)
+  ∧ all_obligation_owners_eventually_resolve(r)
+  ∧ all_finalizers_eventually_complete(r)
   ⟹ eventually R[r].state = Closed(_)
 ```
 
 ### PROG-OBLIGATION: Obligations resolve
 
 ```
-O[o].state = Reserved ∧ fair
+O[o].state = Reserved ∧ owner_eventually_commits_or_aborts(o)
   ⟹ eventually O[o].state ∈ {Committed, Aborted}
   // Leaked is an error state that triggers detection
 ```
@@ -1227,7 +1563,7 @@ Operational oracle (what the lab checks):
 
 We do **not** require identical step-by-step schedules; only independence-respecting equivalence.
 
-### 7.2 Side-condition schema for rewrite rules
+### 7.2 Side-condition schema [Implementation] for rewrite rules
 
 Every rewrite rule must declare the side conditions it relies on in a machine-checkable form.
 This is the contract between the rule author, the analyzer, and the certificate verifier.
@@ -1303,7 +1639,7 @@ race(join(a, b), join(a, c)) ≃ join(a, race(b, c))
 // Don't run 'a' twice
 ```
 
-### 7.8 Denotational sketch (powerdomains for nondeterminism)
+### 7.8 Denotational sketch [Explanatory] (powerdomains for nondeterminism)
 
 Operational semantics is the executable truth; still, it is useful to keep a denotational picture in mind.
 Interpret a closed computation as a set of possible outcomes (nondeterminism from scheduling):
@@ -1322,9 +1658,14 @@ Adequacy (“operational steps generate exactly the denotation”) is the target
 
 ---
 
-## 8. Test Oracle Usage
+## 8. Test Oracle Usage [Implementation]
 
-The lab runtime implements these semantics exactly. Property tests verify:
+The lab runtime supplies executable checks for selected invariants from this
+model. Passing a finite trace or seeded test does not prove exact refinement
+of the complete operational semantics, all possible schedules, or the liveness
+premises above. The implementation mapping and its remaining proof obligations
+are tracked in `formal/lean/coverage/runtime_state_refinement_map.json`.
+Representative trace predicates are:
 
 ```rust
 fn test_property(trace: &[TraceEvent]) -> bool {
@@ -1357,10 +1698,19 @@ spawned = completed
   TaskCompleted{t1} ∈ trace ∧ TaskCompleted{t2} ∈ trace
 ```
 
-### 8.1 Schedule exploration: optimal DPOR (one trace per equivalence class)
+### 8.1 Schedule exploration target: optimal DPOR (one trace per equivalence class)
 
 Because `≃` quotients by independence, the right exploration target is **one execution per Mazurkiewicz trace** (not per interleaving).
 This is exactly what *optimal DPOR* algorithms achieve.
+
+Current implementation boundary: `src/lab/explorer.rs` detects races in a
+completed trace and hashes the parent seed plus race positions to select a new
+deterministic run. It does not restore the exact prefix at a backtracking state
+and force the alternative enabled event. Its sleep-set structure deduplicates
+observed race patterns rather than implementing a conventional state-indexed
+DPOR sleep set. The shipped explorer is therefore DPOR-style, race-informed
+schedule fuzzing with trace-class telemetry; one execution per reachable class
+remains a design target, not a current completeness guarantee.
 
 At a high level:
 
@@ -1368,14 +1718,16 @@ At a high level:
 * when a dependent reordering is discovered, add a backtrack point,
 * use source sets / sleep sets / wakeup trees to avoid redundant schedules.
 
-Result: exploration cost becomes proportional to the number of equivalence classes, not factorial in the number of steps.
+Target result for a complete implementation: exploration cost becomes
+proportional to the number of equivalence classes, not factorial in the number
+of steps.
 
 ### 8.2 Static complement: abstract interpretation for obligation leaks
 
 Dynamic traces catch real bugs; static analysis catches *likely* bugs early.
 A sound (possibly conservative) abstract interpreter can track “may hold unresolved obligations” per scope/task and warn on scope exit.
 
-### 8.3 Proof-carrying trace certificate (spec)
+### 8.3 Proof-carrying trace certificate [Implementation] (spec)
 
 Each trace can carry a compact certificate: a machine-verifiable witness that
 the run respected invariants. The certificate must be deterministic and stable
@@ -1440,7 +1792,57 @@ capped (e.g., first `K` violations). Large traces do not inflate certificates.
 
 ---
 
-## 9. TLA+ Sketch
+## 9. Mechanization Plan (Lean)
+
+Goal: mechanize this semantics in `formal/lean/Asupersync.lean` and prove the
+core invariants that the runtime depends on. The plan below is designed to map
+directly onto the existing small-step rules and the lab/runtime tests.
+
+### 9.1 Structure map
+
+- **State definitions**: `Task`, `Region`, `Obligation`, `Budget`, `Trace` records.
+- **Step relation**: `Step : State → Action → State → Prop` mirroring the rules.
+- **Invariants**: `WellFormed`, `NoLeaks`, `Quiescent`, `LosersDrained`,
+  `CancelProtocol`, `NoAmbientAuthority`.
+- **Trace projection**: `trace : Exec → List Label` + Mazurkiewicz equivalence.
+
+### 9.2 Proof obligations (checklist)
+
+1. **Preservation**: `WellFormed σ → Step σ a σ' → WellFormed σ'`.
+2. **Quiescence on close**: `RegionClosed r σ → Quiescent r σ`.
+3. **No obligation leaks**: `TaskCompleted t σ → Held(t, σ) = ∅`.
+4. **Loser drain**: race completion implies all losers completed.
+5. **Cancel protocol**: request → drain → finalize is monotone and idempotent.
+6. **Deterministic trace projection**: `trace` respects label ordering and
+   independence (`~`), enabling canonicalization.
+7. **Bounded cancel fairness (scheduler)**: if `cancel_streak_limit = L` and
+   a non-cancel task (ready or due-timed) remains continuously enabled,
+   then within at most `L + 1` dispatch steps the scheduler selects a
+   non-cancel task. This requires a `cancel_streak : Nat` counter in the
+   scheduler state and a lemma of the form:
+   `cancel_streak = L ∧ NonCancelReady σ ⇒ dispatch_non_cancel σ`.
+
+### 9.3 Code alignment points
+
+- Each rule has a direct Rust counterpart in `src/runtime/state.rs` and
+  `src/runtime/scheduler/three_lane.rs`.
+- Each invariant maps to lab oracles and property tests; proofs should cite
+  the same predicates as the test harness (`no_task_leaks`, `no_obligation_leaks`,
+  `losers_drained`, `quiescence_on_close`, `cancel_protocol_respected`).
+- Bounded-fairness lemmas align with `cancel_streak_limit` in
+  `src/runtime/scheduler/three_lane.rs` and lab fairness tests in
+  `tests/scheduler_lane_fairness.rs`, `tests/cancel_lane_fairness_bounds.rs`,
+  and `tests/lab_execution.rs`.
+- Trace normalization rules align with `src/trace/*` (Foata, geodesic, DPOR).
+
+### 9.4 Suggested milestone slicing
+
+- M1: core state + Step relation + Preservation proof.
+- M2: cancellation rules + cancel protocol lemma suite.
+- M3: obligation rules + no-leak lemmas.
+- M4: trace equivalence + canonicalization lemmas.
+
+## 10. TLA+ Sketch [Implementation]
 
 For model checking, translate to TLA+:
 
@@ -1488,7 +1890,7 @@ CancelRequest(r, reason) == ...
 
 ---
 
-## 10. Summary
+## 11. Summary
 
 This semantics provides:
 
