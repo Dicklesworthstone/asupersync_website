@@ -29,7 +29,7 @@ export default function BudgetAlgebraViz() {
         <div>
           <h3 className="text-lg font-semibold text-white">Budget Algebra</h3>
           <p className="text-sm text-slate-400 mt-1">
-            Cancel budgets compose as a product semiring across nested regions.
+            Budgets combine with a semiring-like meet as they pass into nested regions.
           </p>
         </div>
       </div>
@@ -68,7 +68,7 @@ export default function BudgetAlgebraViz() {
 
       <div className="mt-8 p-4 rounded-xl border border-white/5 bg-slate-800/30 text-sm text-slate-400 leading-relaxed text-center">
          <p>
-            <strong className="text-white">The Semiring Rules:</strong> Deadlines compose using <code className="text-blue-400 bg-blue-900/30 px-1 rounded">min()</code> because a child cannot outlive its parent. Priorities compose using <code className="text-orange-400 bg-orange-900/30 px-1 rounded">max()</code> because a critical child task forces the entire cancellation tree to be prioritized.
+            <strong className="text-white">Meet rules:</strong> Deadline, poll quota and cost quota combine with <code className="text-blue-400 bg-blue-900/30 px-1 rounded">min()</code>, so a child never gets a looser budget than its scope; priority combines with <code className="text-orange-400 bg-orange-900/30 px-1 rounded">max()</code>. On the production runtime budgets are advisory: a task that overruns one is not killed.
          </p>
       </div>
     </div>

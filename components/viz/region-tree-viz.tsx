@@ -126,7 +126,7 @@ function BudgetBar({
             transition={{ duration: reduced ? 0.01 : durationMs / 1000, ease: "linear" }}
           />
           <text x={400} y={464} textAnchor="middle" fill={ORANGE} fontSize={11} fontFamily="monospace">
-            cancel budget remaining
+            cleanup budget (advisory)
           </text>
         </motion.g>
       )}
@@ -145,7 +145,7 @@ export default function RegionTreeViz() {
   const [regions, setRegions] = useState<Region[]>(makeInitialRegions);
   const [tasks, setTasks] = useState<Task[]>(makeInitialTasks);
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
-  const [globalStatus, setGlobalStatus] = useState<"Running" | "Cancelling..." | "Quiescent">("Running");
+  const [globalStatus, setGlobalStatus] = useState<"Running" | "Cancelling..." | "Finalizing..." | "Quiescent">("Running");
   const [budgetActive, setBudgetActive] = useState(false);
 
   const cancellingRef = useRef(false);
@@ -193,7 +193,7 @@ export default function RegionTreeViz() {
         );
       }, drainStart);
 
-      // Kill tasks one by one
+      // Tasks finish draining and complete one by one
       const tasksInScope = makeInitialTasks().filter((t) => affectedSet.has(t.regionId));
       tasksInScope.forEach((t, i) => {
         schedule(() => {
@@ -201,7 +201,12 @@ export default function RegionTreeViz() {
         }, drainStart + (reduced ? 0 : i * 250 + 100));
       });
 
-      // Phase 3: quiescent
+      // Phase 3: all children done, region finalizers run
+      schedule(() => {
+        setGlobalStatus("Finalizing...");
+      }, drainStart + (reduced ? 0 : tasksInScope.length * 250 + 200));
+
+      // Phase 4: quiescent
       const quiescentTime = drainStart + (reduced ? 0 : tasksInScope.length * 250 + 600);
       schedule(() => {
         setRegions((prev) =>
@@ -240,11 +245,15 @@ export default function RegionTreeViz() {
             className="inline-block h-2.5 w-2.5 rounded-full"
             style={{
               backgroundColor:
-                globalStatus === "Running" ? BLUE : globalStatus === "Cancelling..." ? ORANGE : "#6B7280",
+                globalStatus === "Running"
+                  ? BLUE
+                  : globalStatus === "Cancelling..." || globalStatus === "Finalizing..."
+                    ? ORANGE
+                    : "#6B7280",
               boxShadow:
                 globalStatus === "Running"
                   ? `0 0 8px ${BLUE}80`
-                  : globalStatus === "Cancelling..."
+                  : globalStatus === "Cancelling..." || globalStatus === "Finalizing..."
                     ? `0 0 8px ${ORANGE}80`
                     : "none",
             }}

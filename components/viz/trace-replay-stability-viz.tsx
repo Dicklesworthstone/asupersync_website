@@ -38,8 +38,8 @@ export default function TraceReplayStabilityViz() {
        // The difference is how they are inserted into the supervisor's inbox
 
        if (isDeterministic) {
-          // Asupersync Spork: Always sorted by (vt, tid)
-          // Since VT is identical, it sorts strictly by Task ID (1, 2, 3)
+          // Asupersync Spork: DOWN notifications sorted by (vt, tid, monitor ref)
+          // Since VT is identical and each task has one monitor, task id decides (1, 2, 3)
           setInbox([1]);
           const t2 = setTimeout(() => setInbox([1, 2]), 300);
           const t3 = setTimeout(() => {
@@ -48,7 +48,7 @@ export default function TraceReplayStabilityViz() {
           }, 600);
           timersRef.current.push(t2, t3);
        } else {
-          // Traditional OTP / Non-deterministic: Random order based on thread scheduler races
+          // Unsorted: arrival order depends on which worker thread delivers first
           const shuffled = [...nodes].sort(() => 0.5 - Math.random()).map(n => n.id);
           
           setInbox([shuffled[0]]);
@@ -76,7 +76,7 @@ export default function TraceReplayStabilityViz() {
         <div>
           <h3 className="text-lg font-semibold text-white">Trace Replay Stability</h3>
           <p className="text-sm text-slate-400 mt-1">
-            Resolving concurrent races mathematically for perfect replay.
+            Sorting simultaneous DOWN notifications so replays see the same order.
           </p>
         </div>
         
@@ -85,13 +85,13 @@ export default function TraceReplayStabilityViz() {
              onClick={() => handleModeSwitch(false)}
              className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 ${!isDeterministic ? "bg-slate-700 text-white shadow" : "text-slate-400 hover:text-slate-200"}`}
            >
-             <Dice5 className="h-3 w-3" /> Non-Deterministic (OTP)
+             <Dice5 className="h-3 w-3" /> Unsorted Arrival
            </button>
            <button 
              onClick={() => handleModeSwitch(true)}
              className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 ${isDeterministic ? "bg-indigo-600 text-white shadow" : "text-slate-400 hover:text-slate-200"}`}
            >
-             <GitCommit className="h-3 w-3" /> Deterministic (Spork)
+             <GitCommit className="h-3 w-3" /> Sorted (Spork)
            </button>
         </div>
       </div>
@@ -126,7 +126,7 @@ export default function TraceReplayStabilityViz() {
         {/* Supervisor Inbox */}
         <div className="w-full max-w-sm">
            <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 mb-2 text-center">
-              Supervisor Inbox (Arrival Order)
+              Watcher Inbox (DOWN Order)
            </div>
            <div className="h-14 w-full bg-slate-950 border border-slate-700 rounded-lg flex items-center px-4 gap-3 shadow-inner">
               {inbox.map((nodeId, idx) => {
@@ -169,7 +169,7 @@ export default function TraceReplayStabilityViz() {
                 className="flex items-start gap-4"
               >
                  <CheckCircle2 className="h-6 w-6 text-indigo-400 shrink-0 mt-0.5" />
-                 <p><strong className="text-white">Spork Guarantee:</strong> If multiple monitored tasks die in the exact same scheduling quantum (same virtual time), Spork forces a mathematically stable sort using their internal Task IDs. Replaying the trace 10,000 times will produce the exact same arrival order 10,000 times.</p>
+                 <p><strong className="text-white">DOWN order:</strong> Spork sorts DOWN notifications by (completion virtual time, task id, monitor ref) before delivery, so tasks that fail at the same virtual time are ordered by task id. In the lab, the same seed replays the same order.</p>
               </motion.div>
            ) : (
               <motion.div
@@ -181,7 +181,7 @@ export default function TraceReplayStabilityViz() {
                 className="flex items-start gap-4"
               >
                  <Dice5 className="h-6 w-6 text-slate-400 shrink-0 mt-0.5" />
-                 <p><strong className="text-white">Traditional Problem:</strong> When concurrent nodes crash simultaneously, their death notifications race to the supervisor&apos;s inbox. The order is determined by chaotic OS thread scheduling. A bug caused by one specific arrival order might never reproduce locally.</p>
+                 <p><strong className="text-white">Without a defined order:</strong> DOWN messages from tasks that fail together arrive in whatever order the worker threads deliver them. A bug that depends on one arrival order may not reproduce.</p>
               </motion.div>
            )}
          </AnimatePresence>

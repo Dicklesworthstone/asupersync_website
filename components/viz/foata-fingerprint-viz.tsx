@@ -22,7 +22,7 @@ export default function FoataFingerprintViz() {
         <div>
           <h3 className="text-lg font-semibold text-white">Foata Fingerprinting</h3>
           <p className="text-sm text-slate-400 mt-1">
-            Canonicalizing execution traces to prune DPOR search spaces.
+            Canonicalizing traces up to the order of independent events.
           </p>
         </div>
         
@@ -94,7 +94,7 @@ export default function FoataFingerprintViz() {
 
            <div className="bg-indigo-950/30 border border-indigo-500/20 rounded-lg p-3 text-xs text-indigo-200 flex items-center gap-3 min-w-[320px]">
               <CheckCircle2 className="h-5 w-5 text-indigo-400 shrink-0" />
-              <p>Because <strong>Op A</strong> and <strong>Op B</strong> touch entirely different memory, their execution order is mathematically irrelevant to the final state.</p>
+              <p><strong>Op A</strong> and <strong>Op B</strong> touch different resources, so they commute: running them in either order gives the same result.</p>
            </div>
         </div>
 
@@ -109,7 +109,7 @@ export default function FoataFingerprintViz() {
               <div className="font-mono text-lg font-black text-slate-300">
                  {isSwapped ? rawHashB : rawHashA}
               </div>
-              <p className="text-[11px] text-slate-500 mt-2">Naive DPOR would treat these as two different test cases to explore.</p>
+              <p className="text-[11px] text-slate-500 mt-2">A hash of the raw event sequence treats these as two different runs.</p>
            </div>
 
            <div className="flex-1 p-5 border border-indigo-500/50 bg-indigo-900/20 rounded-xl flex flex-col justify-center relative overflow-hidden shadow-[0_0_30px_rgba(99,102,241,0.1)]">
@@ -120,7 +120,7 @@ export default function FoataFingerprintViz() {
               <div className="font-mono text-lg font-black text-white">
                  {foataHash}
               </div>
-              <p className="text-[11px] text-indigo-300/70 mt-2">Asupersync canonicalizes the trace, proving they belong to the exact same Mazurkiewicz equivalence class. DPOR skips the redundant run.</p>
+              <p className="text-[11px] text-indigo-300/70 mt-2">Both orders have the same Foata normal form, so they fall in one Mazurkiewicz equivalence class. The explorer counts that class once and skips re-exploring it.</p>
            </div>
 
         </div>

@@ -14,7 +14,7 @@ export default function FountainCodeViz() {
   const [status, setStatus] = useState<"idle" | "sending" | "reconstructed">("idle");
   const dropsRef = useRef<number>(0);
   
-  const targetDrops = 40; // Arbitrary target needed to reconstruct
+  const targetDrops = 40; // K source symbols; the sim decodes at exactly K (RaptorQ usually does, K+2 almost always)
   
   const startTransmission = () => {
     if (status === "sending") return;
@@ -60,7 +60,7 @@ export default function FountainCodeViz() {
         <div>
           <h3 className="text-lg font-semibold text-white">RaptorQ Data Transfer</h3>
           <p className="text-sm text-slate-400 mt-1">
-            Rateless erasure coding over lossy channels.
+            RFC 6330 rateless erasure coding over a lossy channel.
           </p>
         </div>
         
@@ -166,7 +166,7 @@ export default function FountainCodeViz() {
               </div>
               <h4 className="text-xl font-black text-white">File Reconstructed</h4>
               <p className="text-sm text-slate-300 mt-2 text-center max-w-xs">
-                Sufficient encoded symbols received. No retransmission requests (NACKs) were required despite 30% packet loss.
+                Got K = {targetDrops} symbols, source or repair. Any K usually suffice (K+2 almost always), so loss cost extra symbols instead of retransmission round trips.
               </p>
             </motion.div>
           )}
@@ -185,7 +185,7 @@ export default function FountainCodeViz() {
         <div>
           <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 mb-1">Symbols Received</div>
           <div className="text-lg font-black font-mono text-white">
-            {receivedDrops} <span className="text-xs text-slate-500">/ {targetDrops}</span>
+            {receivedDrops} <span className="text-xs text-slate-500">/ K={targetDrops}</span>
           </div>
         </div>
         <div>

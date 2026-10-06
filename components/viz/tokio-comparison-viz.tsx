@@ -26,7 +26,7 @@ type Phase = "running" | "cancelling" | "done";
 
 interface Resource {
   name: string;
-  status: "active" | "leaked" | "closing" | "closed";
+  status: "active" | "dropped" | "closing" | "closed";
 }
 
 /* ------------------------------------------------------------------ */
@@ -50,7 +50,7 @@ function ResourceRow({
   resource: Resource;
   reduced: boolean;
 }) {
-  const isLeaked = resource.status === "leaked";
+  const isDropped = resource.status === "dropped";
   const isClosed = resource.status === "closed";
   const isClosing = resource.status === "closing";
 
@@ -58,10 +58,10 @@ function ResourceRow({
   let labelColor = `${BLUE_GLOW}99`;
   let statusLabel = "";
 
-  if (isLeaked) {
+  if (isDropped) {
     dotColor = RED;
     labelColor = RED_GLOW;
-    statusLabel = "LEAKED";
+    statusLabel = "Dropped";
   } else if (isClosed) {
     dotColor = GREEN;
     labelColor = GREEN_GLOW;
@@ -78,7 +78,7 @@ function ResourceRow({
       style={{ background: `${SURFACE}80` }}
       initial={false}
       animate={{
-        borderColor: isLeaked ? `${RED}44` : isClosed ? `${GREEN}44` : "transparent",
+        borderColor: isDropped ? `${RED}44` : isClosed ? `${GREEN}44` : "transparent",
       }}
       transition={{ duration: reduced ? 0 : 0.3 }}
     >
@@ -88,7 +88,7 @@ function ResourceRow({
           style={{ backgroundColor: dotColor }}
           animate={{
             backgroundColor: dotColor,
-            boxShadow: isLeaked
+            boxShadow: isDropped
               ? `0 0 6px ${RED}80`
               : isClosed
                 ? `0 0 6px ${GREEN}80`
@@ -106,13 +106,13 @@ function ResourceRow({
           <motion.span
             key={statusLabel}
             className="font-mono text-xs font-semibold"
-            style={{ color: isLeaked ? RED_GLOW : isClosed ? GREEN_GLOW : ORANGE }}
+            style={{ color: isDropped ? RED_GLOW : isClosed ? GREEN_GLOW : ORANGE }}
             initial={{ opacity: 0, x: 8 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0 }}
             transition={{ duration: reduced ? 0 : 0.25 }}
           >
-            {isLeaked && "⚠ "}
+            {isDropped && "⚠ "}
             {statusLabel}
             {isClosed && " ✓"}
           </motion.span>
@@ -356,17 +356,17 @@ export default function TokioComparisonViz() {
     setTokioProgress(65);
     setAsyncProgress(65);
 
-    /* === Tokio side: instant drop === */
+    /* === Tokio side: abort() drops the future at its next .await === */
     schedule(() => {
       setTokioTaskVisible(false);
       setTokioProgress(0);
     }, 150);
 
-    // Leak resources one by one (fast)
+    // Resources are dropped synchronously; no async cleanup runs
     RESOURCE_NAMES.forEach((name, i) => {
       schedule(() => {
         setTokioResources((prev) =>
-          prev.map((r) => (r.name === name ? { ...r, status: "leaked" } : r)),
+          prev.map((r) => (r.name === name ? { ...r, status: "dropped" } : r)),
         );
       }, 300 + i * 250);
     });
@@ -421,8 +421,8 @@ export default function TokioComparisonViz() {
   /* Cleanup on unmount */
   useEffect(() => () => clearTimers(), [clearTimers]);
 
-  const tokioStatus = "Task dropped. Resources leaked.";
-  const asyncStatus = "Task cancelled cleanly. All resources released.";
+  const tokioStatus = "Future dropped at its next .await. Drop ran; no async cleanup.";
+  const asyncStatus = "Cancel requested, task drained, finalizers ran.";
 
   return (
     <div
@@ -496,7 +496,7 @@ export default function TokioComparisonViz() {
       {/* Side-by-side panels */}
       <div className="flex flex-col md:flex-row gap-4 p-4 pt-2">
         <Panel
-          title="Tokio"
+          title="Tokio: abort()"
           side="tokio"
           phase={phase}
           resources={tokioResources}
@@ -506,7 +506,7 @@ export default function TokioComparisonViz() {
           reduced={reduced}
         />
         <Panel
-          title="Asupersync"
+          title="Asupersync: cancel"
           side="asupersync"
           phase={phase}
           resources={asyncResources}
@@ -521,6 +521,7 @@ export default function TokioComparisonViz() {
       <AnimatePresence>
         {(phase === "running") && (
           <motion.p
+            key="hint"
             className="pb-4 text-center font-mono text-xs"
             style={{ color: `${BLUE_GLOW}44` }}
             initial={{ opacity: 0 }}
@@ -529,6 +530,19 @@ export default function TokioComparisonViz() {
             transition={{ duration: reduced ? 0 : 0.3 }}
           >
             Press &quot;Cancel Now&quot; to compare cancel behavior
+          </motion.p>
+        )}
+        {phase === "done" && (
+          <motion.p
+            key="note"
+            className="px-4 pb-4 text-center font-mono text-xs"
+            style={{ color: `${BLUE_GLOW}99` }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: reduced ? 0 : 0.3 }}
+          >
+            In tokio, dropping a JoinHandle detaches the task; CancellationToken and JoinSet add cooperative and scoped cancellation. Asupersync&apos;s drain waits for the task to reach a checkpoint, and its cleanup budget is advisory.
           </motion.p>
         )}
       </AnimatePresence>

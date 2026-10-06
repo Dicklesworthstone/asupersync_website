@@ -2,23 +2,25 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Key, Globe, FileDigit, Clock, GitFork, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Key, Globe, HardDrive, Clock, Dices, GitFork, ShieldAlert, ShieldCheck } from "lucide-react";
 
-type Capability = "net" | "fs" | "timer" | "spawn";
+type Capability = "spawn" | "time" | "random" | "io" | "remote";
 
-const CAPABILITIES: { id: Capability; label: string; icon: React.ElementType; color: string }[] = [
-  { id: "net", label: "Network I/O", icon: Globe, color: "#3B82F6" },
-  { id: "fs", label: "File System", icon: FileDigit, color: "#F59E0B" },
-  { id: "timer", label: "Timers", icon: Clock, color: "#8B5CF6" },
-  { id: "spawn", label: "Spawn Tasks", icon: GitFork, color: "#10B981" },
+// Order matches CapSet<SPAWN, TIME, RANDOM, IO, REMOTE>
+const CAPABILITIES: { id: Capability; label: string; op: string; icon: React.ElementType; color: string }[] = [
+  { id: "spawn", label: "Spawn", op: "cx.spawn", icon: GitFork, color: "#10B981" },
+  { id: "time", label: "Time", op: "sleep", icon: Clock, color: "#8B5CF6" },
+  { id: "random", label: "Random", op: "cx.random_u64", icon: Dices, color: "#EC4899" },
+  { id: "io", label: "IO", op: "TcpStream::connect", icon: HardDrive, color: "#3B82F6" },
+  { id: "remote", label: "Remote", op: "spawn_remote", icon: Globe, color: "#F59E0B" },
 ];
 
 type AttemptState = "idle" | "checking" | "granted" | "denied";
 
 export default function CapabilitySecurityViz() {
-  const [activeCaps, setActiveCaps] = useState<Set<Capability>>(new Set(["net", "timer"]));
+  const [activeCaps, setActiveCaps] = useState<Set<Capability>>(new Set(["io", "time"]));
   const [attemptState, setAttemptState] = useState<AttemptState>("idle");
-  const [, setActiveAction] = useState<Capability | null>(null);
+  const [activeAction, setActiveAction] = useState<Capability | null>(null);
 
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
@@ -66,7 +68,7 @@ export default function CapabilitySecurityViz() {
       <div className="mb-8 text-center">
         <h3 className="text-lg font-semibold text-white">Capability Gates</h3>
         <p className="text-sm text-slate-400 mt-1">
-          Configure the <span className="text-blue-400 font-mono">Cx</span> token and attempt operations.
+          Narrow the <span className="text-blue-400 font-mono">Cx</span> capability row, then try an operation.
         </p>
       </div>
 
@@ -92,7 +94,7 @@ export default function CapabilitySecurityViz() {
                     key={cap.id}
                     onClick={() => toggleCap(cap.id)}
                     disabled={attemptState !== "idle"}
-                    className="flex flex-col items-center gap-2 p-3 rounded-lg border transition-all"
+                    className="flex flex-col items-center gap-2 p-3 rounded-lg border transition-all last:odd:col-span-2"
                     style={{
                       borderColor: isActive ? cap.color : "#1e293b",
                       backgroundColor: isActive ? `${cap.color}15` : "transparent",
@@ -113,6 +115,9 @@ export default function CapabilitySecurityViz() {
                 );
               })}
             </div>
+            <div className="mt-4 text-center font-mono text-[10px] text-slate-500">
+              Cx&lt;CapSet&lt;{CAPABILITIES.map((c) => (activeCaps.has(c.id) ? "true" : "false")).join(", ")}&gt;&gt;
+            </div>
           </div>
         </div>
 
@@ -130,9 +135,9 @@ export default function CapabilitySecurityViz() {
                   <button
                     key={`action-${cap.id}`}
                     onClick={() => attemptAction(cap.id)}
-                    className="py-3 px-4 rounded-lg border border-slate-700/50 bg-slate-800/30 text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white transition-all flex items-center justify-center gap-2"
+                    className="py-3 px-4 rounded-lg border border-slate-700/50 bg-slate-800/30 text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white transition-all flex items-center justify-center gap-2 font-mono last:odd:col-span-2"
                   >
-                    Use {cap.label}
+                    {cap.op}
                   </button>
                 ))}
               </div>
@@ -180,7 +185,9 @@ export default function CapabilitySecurityViz() {
                         <ShieldAlert className="h-8 w-8 text-red-500" />
                       </div>
                       <span className="text-lg font-bold text-red-400">Access Denied</span>
-                      <span className="text-xs text-slate-500 mt-1">Cx lacks required capability</span>
+                      <span className="text-xs text-slate-500 mt-1 text-center">
+                        {activeAction === "io" ? "Refused with [ASUP-E009]: no IO capability" : "Cx lacks the required capability"}
+                      </span>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -190,6 +197,10 @@ export default function CapabilitySecurityViz() {
         </div>
 
       </div>
+
+      <p className="mt-8 text-center text-xs text-slate-500 leading-relaxed">
+        <span className="font-mono">Cx::restrict</span> narrows the row at the type level, so gated APIs reject a missing capability at compile time. Plain I/O such as <span className="font-mono">TcpStream::connect</span> takes no Cx; it checks the task&apos;s context at run time and refuses with ASUP-E009.
+      </p>
     </div>
   );
 }

@@ -11,9 +11,9 @@ export default function CalmViz() {
     <div className="w-full rounded-2xl border border-white/10 p-6 md:p-8 bg-slate-950">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
         <div>
-          <h3 className="text-lg font-semibold text-white">CALM Theorem Optimization</h3>
+          <h3 className="text-lg font-semibold text-white">CALM in the Saga Planner</h3>
           <p className="text-sm text-slate-400 mt-1">
-            Minimizing locks using formal monotonicity analysis.
+            Of the planner&apos;s 16 saga op kinds, 7 are monotone and 9 are not.
           </p>
         </div>
         
@@ -47,7 +47,7 @@ export default function CalmViz() {
             >
                <div className="text-center absolute -top-4 left-1/2 -translate-x-1/2 w-full">
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-green-500/10 text-green-400 border border-green-500/20 rounded-full text-[11px] font-bold uppercase tracking-widest">
-                     Coordination-Free Fast Path
+                     Coordination-Free Batch
                   </span>
                </div>
                
@@ -89,7 +89,7 @@ export default function CalmViz() {
 
                      <div className="h-20 w-28 bg-slate-950 border-2 border-green-500/50 rounded-xl flex flex-col items-center justify-center shadow-[0_0_20px_rgba(34,197,94,0.15)] z-10 relative bg-opacity-90">
                         <Layers className="h-6 w-6 text-green-400 mb-1" />
-                        <span className="text-[10px] sm:text-xs font-mono text-green-300 tracking-wider">Set \u222A {`{x}`}</span>
+                        <span className="text-[10px] sm:text-xs font-mono text-green-300 tracking-wider">{"Set \u222A {x}"}</span>
                      </div>
                   </div>
 
@@ -122,7 +122,7 @@ export default function CalmViz() {
             >
                <div className="text-center absolute -top-4 left-1/2 -translate-x-1/2 w-full">
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-red-500/10 text-red-400 border border-red-500/20 rounded-full text-[11px] font-bold uppercase tracking-widest">
-                     Synchronization Barrier Required
+                     Coordinated Barrier
                   </span>
                </div>
                
@@ -183,7 +183,7 @@ export default function CalmViz() {
               exit={{ opacity: 0, y: -2 }}
               transition={{ duration: 0.2 }}
             >
-              <p><strong className="text-white">Monotone Operations:</strong> Actions that only add information (like appending to a channel or reserving an obligation) never depend on the <em>absence</em> of data. According to the CALM theorem, these operations can execute entirely in parallel without any coordination locks.</p>
+              <p><strong className="text-white">Monotone steps</strong> (Reserve, Send, Acquire, Renew, Delegate, CrdtMerge, CancelRequest) only add information and never depend on the <em>absence</em> of data. By CALM they need no coordination, so MonotoneSagaExecutor batches consecutive monotone steps and merges them with a lattice join.</p>
             </motion.div>
           ) : (
             <motion.div
@@ -193,7 +193,7 @@ export default function CalmViz() {
               exit={{ opacity: 0, y: -2 }}
               transition={{ duration: 0.2 }}
             >
-              <p><strong className="text-white">Non-Monotone Operations:</strong> Actions that check a threshold or depend on negation (like <code className="text-red-400 bg-red-900/30 px-1 rounded">RegionClose</code> ensuring <em>zero</em> active tasks remain) fundamentally require a synchronization barrier. Asupersync pushes these heavy barriers out of the hot path.</p>
+              <p><strong className="text-white">Non-monotone steps</strong> (Commit, Abort, Recv, Release, RegionClose, CancelDrain, MarkLeaked, BudgetCheck, LeakDetection) depend on something being absent, like <code className="text-red-400 bg-red-900/30 px-1 rounded">RegionClose</code> checking that <em>zero</em> tasks remain. The executor puts one coordinated barrier before each of them.</p>
             </motion.div>
           )}
         </AnimatePresence>

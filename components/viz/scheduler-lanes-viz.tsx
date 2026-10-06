@@ -254,7 +254,7 @@ export default function SchedulerLanesViz() {
             Three-Lane Scheduler
           </h3>
           <p className="mt-0.5 text-xs text-slate-500">
-            Priority: Cancel &gt; Timed &gt; Ready
+            Cancel &gt; Timed (EDF) &gt; Ready, with bounded preemption: after 16 cancel dispatches in a row (32 while draining), ready or timed work gets a slot.
           </p>
         </div>
         <TrafficLight activeLane={activeLane} />

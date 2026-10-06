@@ -88,9 +88,9 @@ export default function SagaCompensationViz() {
     <div className="w-full rounded-2xl border border-white/10 p-6 md:p-8 bg-slate-950">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
         <div>
-          <h3 className="text-lg font-semibold text-white">Distributed Sagas</h3>
+          <h3 className="text-lg font-semibold text-white">Saga Compensation</h3>
           <p className="text-sm text-slate-400 mt-1">
-            Automatic LIFO compensation when long-running workflows fail.
+            When a step fails, completed steps are compensated in reverse order.
           </p>
         </div>
         
@@ -130,8 +130,8 @@ export default function SagaCompensationViz() {
            {status === "idle" && "Ready"}
            {status === "running" && "Executing Forward Actions"}
            {status === "failed" && "Failure Detected at Step 3"}
-           {status === "rolling-back" && "Running Compensating Actions (LIFO)"}
-           {status === "compensated" && "Saga Safely Aborted & Refunded"}
+           {status === "rolling-back" && "Compensating in Reverse Order"}
+           {status === "compensated" && "Saga Aborted, Compensations Ran"}
         </div>
 
         {/* Nodes */}
@@ -190,7 +190,7 @@ export default function SagaCompensationViz() {
 
       <div className="mt-6 p-4 rounded-xl border border-white/5 bg-slate-800/30 text-sm text-slate-400 leading-relaxed">
          <p>
-            When a distributed transaction spans multiple services, you cannot hold a single database lock. Instead, <strong className="text-white">Sagas</strong> define a forward path and a backward (compensating) path. If an error occurs (or if the user clicks &apos;Cancel&apos; midway through), Asupersync automatically walks backward up the tree, executing the registered compensations in strict LIFO order to restore the system to a clean state.
+            Each step of a <strong className="text-white">remote::Saga</strong> registers a compensation when it succeeds. If a later step fails, or the saga is aborted or dropped before <code className="text-emerald-400">complete()</code>, the registered compensations run last to first; they undo only what you write them to undo.
          </p>
       </div>
     </div>

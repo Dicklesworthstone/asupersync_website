@@ -13,10 +13,10 @@ interface Task {
 }
 
 const TASKS: Task[] = [
-  { id: "A", label: "Task A — parse config", color: "#3B82F6", duration: 0.85 },
-  { id: "B", label: "Task B — build graph", color: "#22c55e", duration: 0.65 },
-  { id: "C", label: "Task C — sync state", color: "#F97316", duration: 1.0 },
-  { id: "D", label: "Task D — emit events", color: "#8B5CF6", duration: 0.55 },
+  { id: "A", label: "Task A: parse config", color: "#3B82F6", duration: 0.85 },
+  { id: "B", label: "Task B: build graph", color: "#22c55e", duration: 0.65 },
+  { id: "C", label: "Task C: sync state", color: "#F97316", duration: 1.0 },
+  { id: "D", label: "Task D: emit events", color: "#8B5CF6", duration: 0.55 },
 ];
 
 /* ── Seeded PRNG (mulberry32) ─────────────────────────────────────── */
@@ -203,7 +203,7 @@ export default function LabRuntimeViz() {
             <div className="h-2.5 w-2.5 rounded-full bg-green-500/60" />
           </div>
           <span className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">
-            Lab Runtime — Deterministic Replay
+            Lab Runtime: Deterministic Replay
           </span>
         </div>
 
@@ -278,8 +278,8 @@ export default function LabRuntimeViz() {
         transition={{ delay: reducedMotion ? 0.2 : 1.4, duration: 0.6 }}
         className="mt-8 text-center text-sm font-medium text-slate-500 border-t border-white/5 pt-5"
       >
-        Same code, same seed&nbsp;=&nbsp;same execution order.{" "}
-        <span className="text-blue-400">Every time.</span>
+        Same code, same seed&nbsp;=&nbsp;same schedule.{" "}
+        <span className="text-blue-400">Time is virtual, so the wall clock doesn&apos;t matter.</span>
       </motion.p>
     </div>
   );

@@ -46,11 +46,11 @@ export default function DporPruningViz() {
     <div className="w-full rounded-2xl border border-white/10 p-6 md:p-8 bg-slate-950">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
         <div>
-          <h3 className="text-lg font-semibold text-white">Dynamic Partial Order Reduction</h3>
+          <h3 className="text-lg font-semibold text-white">DPOR-Style Schedule Exploration</h3>
           <p className="text-sm text-slate-400 mt-1">
-            {isDporEnabled 
-              ? "Pruning redundant commutations from the search space." 
-              : "Naive exploration of all possible task interleavings."}
+            {isDporEnabled
+              ? "Race-guided seeds, with already-seen Foata classes pruned. Class count is a campaign metric, not a completeness proof."
+              : "Blind seed sweep: many runs repeat an interleaving class already seen."}
           </p>
         </div>
         
@@ -63,7 +63,7 @@ export default function DporPruningViz() {
           }`}
         >
           {isDporEnabled ? <Scissors className="h-4 w-4" /> : <GitMerge className="h-4 w-4" />}
-          {isDporEnabled ? "DPOR Active" : "Enable DPOR"}
+          {isDporEnabled ? "Race-Guided" : "Enable Race Guidance"}
         </button>
       </div>
 
@@ -117,9 +117,9 @@ export default function DporPruningViz() {
           </div>
         </div>
         <div>
-          <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 mb-1">Time to Verify</div>
+          <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 mb-1">Next Seed From</div>
           <div className={`text-2xl font-black font-mono transition-colors ${isDporEnabled ? "text-green-400" : "text-red-400"}`}>
-            {isDporEnabled ? "0.02s" : "Timeout"}
+            {isDporEnabled ? "Races" : "Sweep"}
           </div>
         </div>
       </div>
