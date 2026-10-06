@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu, X, Home, Eye, Cpu, Zap, ChevronRight, Globe, Sparkles, BookOpen, Droplets } from "lucide-react";
+import { Menu, X, Home, Eye, Cpu, Zap, ChevronRight, Globe, Sparkles, BookOpen, Droplets, Search } from "lucide-react";
 import { useState, useEffect } from "react";
 import { navItems, siteConfig } from "@/lib/content";
 import { useBodyScrollLock } from "@/hooks/use-body-scroll-lock";
@@ -16,7 +16,7 @@ export default function SiteHeader() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
-  const { toggleLabMode, isLabMode, isAudioEnabled, toggleAudio } = useSite();
+  const { toggleLabMode, isLabMode, setPaletteOpen } = useSite();
 
   useBodyScrollLock(open);
 
@@ -121,6 +121,15 @@ export default function SiteHeader() {
 
             {/* Tools */}
             <div className="flex items-center justify-end gap-2 shrink-0">
+              <button
+                onClick={() => setPaletteOpen(true)}
+                aria-label="Search the site"
+                aria-keyshortcuts="Control+K Meta+K"
+                className="flex items-center gap-2 h-9 pl-3 pr-2 rounded-lg border border-white/10 bg-white/[0.03] text-slate-400 hover:text-white hover:border-blue-500/30 transition-colors"
+              >
+                <Search className="h-3.5 w-3.5" />
+                <kbd className="hidden xl:inline text-[10px] font-bold tracking-wider text-slate-500">⌘K</kbd>
+              </button>
               <button onClick={toggleLabMode} aria-label="Toggle Lab Mode" aria-pressed={isLabMode} className={cn("p-2 rounded-lg transition-colors", isLabMode ? "text-blue-400 bg-blue-500/10" : "text-slate-400 hover:text-white hover:bg-white/5")}>
                 <Eye className="h-4 w-4" />
               </button>
@@ -218,7 +227,7 @@ export default function SiteHeader() {
               <div className="mt-auto space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <button onClick={toggleLabMode} aria-pressed={isLabMode} className={cn("p-4 rounded-xl border text-[10px] font-black transition-all", isLabMode ? "bg-blue-500 text-white border-blue-400" : "bg-white/5 border-white/10 text-slate-400")}>LAB MODE</button>
-                  <button onClick={toggleAudio} aria-pressed={isAudioEnabled} className={cn("p-4 rounded-xl border text-[10px] font-black transition-all", isAudioEnabled ? "bg-blue-500 text-white border-blue-400" : "bg-white/5 border-white/10 text-slate-400")}>AUDIO</button>
+                  <button onClick={() => { setOpen(false); setPaletteOpen(true); }} className="p-4 rounded-xl border text-[10px] font-black transition-all bg-white/5 border-white/10 text-slate-400">SEARCH</button>
                 </div>
               </div>
             </motion.div>

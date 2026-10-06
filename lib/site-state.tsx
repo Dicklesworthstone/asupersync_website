@@ -1,125 +1,35 @@
 "use client";
 
-import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from "react";
+import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
 import { cn, isTextInputLike } from "./utils";
 
 interface SiteContextType {
   isLabMode: boolean;
   toggleLabMode: () => void;
-  isAudioEnabled: boolean;
-  toggleAudio: () => void;
-  playSfx: (type: "click" | "zap" | "hum" | "error") => void;
+  isPaletteOpen: boolean;
+  setPaletteOpen: (open: boolean) => void;
 }
 
 const SiteContext = createContext<SiteContextType | undefined>(undefined);
 
 export function SiteProvider({ children }: { children: React.ReactNode }) {
   const [isLabMode, setIsLabMode] = useState(false);
-  const [isAudioEnabled, setIsAudioEnabled] = useState(false);
-  const audioEnabledRef = useRef(false);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const audioTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (audioTimerRef.current) clearTimeout(audioTimerRef.current);
-      if (audioContextRef.current) {
-        audioContextRef.current.close().catch(console.error);
-        audioContextRef.current = null;
-      }
-    };
-  }, []);
-
-  const playSfx = useCallback((type: "click" | "zap" | "hum" | "error") => {
-    if (!audioEnabledRef.current) return;
-
-    try {
-      if (!audioContextRef.current) {
-        const WebkitAudioContext = (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-        const AudioCtx = window.AudioContext || WebkitAudioContext;
-        if (!AudioCtx) return;
-        audioContextRef.current = new AudioCtx();
-      }
-
-      const ctx = audioContextRef.current;
-      if (ctx.state === "suspended") {
-        ctx.resume().catch(console.error);
-      }
-
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      const now = ctx.currentTime;
-
-      switch (type) {
-        case "click":
-          osc.type = "sine";
-          osc.frequency.setValueAtTime(800, now);
-          osc.frequency.exponentialRampToValueAtTime(100, now + 0.1);
-          gain.gain.setValueAtTime(0.1, now);
-          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-          osc.start(now);
-          osc.stop(now + 0.1);
-          break;
-        case "zap":
-          osc.type = "sine";
-          osc.frequency.setValueAtTime(600, now);
-          osc.frequency.exponentialRampToValueAtTime(80, now + 0.15);
-          gain.gain.setValueAtTime(0.04, now);
-          gain.gain.linearRampToValueAtTime(0, now + 0.15);
-          osc.start(now);
-          osc.stop(now + 0.15);
-          break;
-        case "hum":
-          osc.type = "triangle";
-          osc.frequency.setValueAtTime(60, now);
-          gain.gain.setValueAtTime(0, now);
-          gain.gain.linearRampToValueAtTime(0.1, now + 0.1);
-          gain.gain.linearRampToValueAtTime(0, now + 0.5);
-          osc.start(now);
-          osc.stop(now + 0.5);
-          break;
-        case "error":
-          osc.type = "square";
-          osc.frequency.setValueAtTime(150, now);
-          osc.frequency.setValueAtTime(100, now + 0.1);
-          gain.gain.setValueAtTime(0.05, now);
-          gain.gain.linearRampToValueAtTime(0, now + 0.3);
-          osc.start(now);
-          osc.stop(now + 0.3);
-          break;
-      }
-    } catch (err) {
-      console.error("Audio protocol failure:", err);
-    }
-  }, []);
+  const [isPaletteOpen, setPaletteOpen] = useState(false);
 
   const toggleLabMode = useCallback(() => {
-    setIsLabMode(prev => !prev);
-    playSfx("click");
-  }, [playSfx]);
-
-  const toggleAudio = useCallback(() => {
-    const nextState = !audioEnabledRef.current;
-    audioEnabledRef.current = nextState;
-    setIsAudioEnabled(nextState);
-    if (nextState) {
-      if (audioTimerRef.current) clearTimeout(audioTimerRef.current);
-      audioTimerRef.current = setTimeout(() => {
-        audioTimerRef.current = null;
-        if (audioEnabledRef.current) playSfx("hum");
-      }, 150);
-    }
-  }, [playSfx]);
+    setIsLabMode((prev) => !prev);
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const typing = isTextInputLike(document.activeElement);
+      // Ctrl/Cmd+K toggles the command palette, even from a text field.
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((prev) => !prev);
+        return;
+      }
       if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "x") {
-        if (typing) return;
+        if (isTextInputLike(document.activeElement)) return;
         e.preventDefault();
         toggleLabMode();
       }
@@ -133,9 +43,8 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
       value={{
         isLabMode,
         toggleLabMode,
-        isAudioEnabled,
-        toggleAudio,
-        playSfx
+        isPaletteOpen,
+        setPaletteOpen,
       }}
     >
       <div className={cn("min-h-screen transition-colors duration-700", isLabMode ? "lab-mode" : "")}>

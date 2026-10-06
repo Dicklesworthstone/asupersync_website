@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useForm, useStore } from "@tanstack/react-form";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Search, X } from "lucide-react";
@@ -73,8 +74,36 @@ export default function GlossaryPage() {
     rowVirtualizer.measure();
   }, [rowVirtualizer, selected, virtualRows.length]);
 
+  // /glossary?term=Name opens that definition and scrolls it into view.
+  const pendingTermRef = useRef<string | null>(null);
+  const openTerm = useCallback(
+    (term: string) => {
+      const match = glossaryTerms.find((t) => t.term.toLowerCase() === term.toLowerCase());
+      if (!match) return;
+      pendingTermRef.current = match.term;
+      searchForm.setFieldValue("query", "");
+      setSelected(match.term);
+    },
+    [searchForm]
+  );
+
+  useEffect(() => {
+    const pending = pendingTermRef.current;
+    if (!pending || selected !== pending) return;
+    const index = virtualRows.findIndex((row) => row.type === "term" && row.term.term === pending);
+    if (index < 0) return;
+    pendingTermRef.current = null;
+    listRef.current?.scrollIntoView({ block: "center" });
+    rowVirtualizer.scrollToIndex(index, { align: "start" });
+  }, [selected, virtualRows, rowVirtualizer]);
+
   return (
     <main id="main-content">
+      {/* Reading the query string opts this subtree out of static rendering,
+          so it stays tiny and the rest of the page is still prerendered. */}
+      <Suspense fallback={null}>
+        <TermFromUrl onTerm={openTerm} />
+      </Suspense>
       <section className="relative pt-32 pb-20 overflow-hidden">
         <div className="absolute inset-0 z-0">
           <div className="absolute top-0 right-1/4 w-[400px] h-[400px] bg-blue-500/10 rounded-full blur-[100px]" />
@@ -184,4 +213,12 @@ export default function GlossaryPage() {
       </div>
     </main>
   );
+}
+
+function TermFromUrl({ onTerm }: { onTerm: (term: string) => void }) {
+  const term = useSearchParams().get("term");
+  useEffect(() => {
+    if (term) onTerm(term);
+  }, [term, onTerm]);
+  return null;
 }

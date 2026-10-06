@@ -431,6 +431,62 @@ export const labOracles: LabOracle[] = [
   { name: "supervisor_quiescence", description: "Checks Spork supervisor region quiescence.", fed: false },
 ];
 
+export type DemoStatus = "default" | "api" | "lab" | "opt-in" | "diagnostic" | "model";
+
+export interface ShowcaseDemo {
+  id: string;
+  title: string;
+  eyebrow: string;
+  chapter: string;
+  status?: DemoStatus;
+  /** Plain-text one-liner, used by search. */
+  summary: string;
+  /** Upstream paths (relative to the repo root) where the mechanism lives. */
+  sources: readonly string[];
+  /** Mirrored spec docs that go deeper, by slug. */
+  docs?: readonly string[];
+}
+
+export const showcaseChapters = [
+  "Ownership and cancellation",
+  "Capabilities and budgets",
+  "Testing",
+  "Actors, sagas, and data",
+  "Formal model and adaptive machinery",
+] as const;
+
+// Every upstream path below was checked against the repository.
+const showcaseDemoList = [
+  { id: "region-tree", title: "Region tree", eyebrow: "Structured concurrency", chapter: showcaseChapters[0], status: "default", summary: "Close a region and watch cancellation reach every task it owns.", sources: ["src/record/region.rs", "src/cx/scope.rs", "src/runtime/state.rs"] },
+  { id: "cancel-protocol", title: "Cancellation protocol", eyebrow: "Cancellation", chapter: showcaseChapters[0], status: "default", summary: "Request, drain, finalize: cancellation as a cooperative protocol instead of a drop.", sources: ["src/types/cancel.rs", "src/cancel/mod.rs", "src/record/task.rs"], docs: ["formal-semantics"] },
+  { id: "comparison", title: "tokio vs Asupersync", eyebrow: "Comparison", chapter: showcaseChapters[0], summary: "The same work shut down by tokio's abort and by Asupersync's cancel protocol.", sources: ["benches/runtime_vs_tokio.rs"], docs: ["integration"] },
+  { id: "two-phase-effects", title: "Reserve, then commit", eyebrow: "Two-phase effects", chapter: showcaseChapters[0], status: "default", summary: "Reserve channel capacity first and commit separately, so a cancelled send never half-happens.", sources: ["src/channel/mpsc.rs", "src/runtime/effects/network.rs"] },
+  { id: "obligations", title: "Permit lifecycle", eyebrow: "Obligations", chapter: showcaseChapters[0], status: "default", summary: "Permits the runtime tracks: sent, aborted, or reported as leaked by the lab oracle.", sources: ["src/record/obligation.rs", "src/obligation", "src/sync/semaphore.rs"] },
+  { id: "scheduler", title: "Three lanes", eyebrow: "Scheduler", chapter: showcaseChapters[0], status: "default", summary: "Cancel, timed, and ready lanes, with cancel preemption bounded at 16 in a row.", sources: ["src/runtime/scheduler/three_lane.rs", "src/runtime/scheduler/local_queue.rs"], docs: ["scheduler-arena-plan"] },
+  { id: "capability-security", title: "Capability gates", eyebrow: "Capabilities", chapter: showcaseChapters[1], status: "default", summary: "The capability row on Cx: spawn, time, random, I/O, remote. Narrow it and see what still works.", sources: ["src/cx/cap.rs", "src/cx/cx.rs"], docs: ["security-threat-model"] },
+  { id: "macaroon-caveats", title: "Macaroon caveats", eyebrow: "Delegation", chapter: showcaseChapters[1], status: "opt-in", summary: "HMAC-chained capability tokens that anyone can restrict and nobody can widen.", sources: ["src/cx/macaroon.rs"], docs: ["security-threat-model"] },
+  { id: "budget-algebra", title: "Budget algebra", eyebrow: "Budgets", chapter: showcaseChapters[1], status: "default", summary: "Nested deadlines and quotas combine with meet: the tighter limit always wins.", sources: ["src/types/budget.rs"] },
+  { id: "lab-runtime", title: "Lab runtime", eyebrow: "Determinism", chapter: showcaseChapters[2], status: "lab", summary: "Virtual time and a seeded scheduler: the same seed replays the same schedule.", sources: ["src/lab/runtime.rs", "src/lab/config.rs"], docs: ["replay-debugging"] },
+  { id: "cancellation-injection", title: "Cancellation injection", eyebrow: "Cancellation testing", chapter: showcaseChapters[2], status: "lab", summary: "Rerun a test once per await point, cancelling at each, with oracles checking every run.", sources: ["src/lab/injection.rs", "examples/cancellation_injection.rs"], docs: ["cancellation-testing"] },
+  { id: "test-oracles", title: "Oracles and e-processes", eyebrow: "Oracles", chapter: showcaseChapters[2], status: "lab", summary: "Invariant oracles after every lab run, summarized across seeds with an anytime-valid e-process.", sources: ["src/lab/oracle/registry.rs", "src/lab/oracle/eprocess.rs"] },
+  { id: "dpor-pruning", title: "Race-guided exploration", eyebrow: "Exploration", chapter: showcaseChapters[2], status: "lab", summary: "Derive seeds from detected races and skip schedules equivalent to ones already seen.", sources: ["src/lab/explorer.rs", "src/trace/dpor.rs", "src/trace/independence.rs"] },
+  { id: "foata-fingerprints", title: "Foata fingerprints", eyebrow: "Trace theory", chapter: showcaseChapters[2], status: "lab", summary: "A canonical hash of an execution up to reordering of independent events.", sources: ["src/trace/canonicalize.rs"], docs: ["formal-semantics"] },
+  { id: "trace-replay-stability", title: "Trace replay", eyebrow: "Replay", chapter: showcaseChapters[2], status: "lab", summary: "Simultaneous failures delivered in a fixed order, so a replay is a replay.", sources: ["src/monitor.rs", "src/lab/virtual_time_wheel.rs"], docs: ["spork-deterministic-ordering"] },
+  { id: "conformal-calibration", title: "Conformal calibration", eyebrow: "Statistics", chapter: showcaseChapters[2], status: "opt-in", summary: "Flag seeds whose oracle metrics fall outside a distribution-free 95% prediction set.", sources: ["src/lab/conformal.rs"] },
+  { id: "spork-otp", title: "Spork", eyebrow: "Actors", chapter: showcaseChapters[3], status: "api", summary: "GenServers, supervisors, links, and monitors that always belong to a region.", sources: ["src/gen_server.rs", "src/supervision.rs", "src/spork.rs", "src/actor.rs"], docs: ["spork-glossary-invariants", "otp-comparison"] },
+  { id: "saga-compensation", title: "Sagas", eyebrow: "Distributed", chapter: showcaseChapters[3], status: "api", summary: "Compensate completed steps in reverse order when a later step fails.", sources: ["src/remote.rs"] },
+  { id: "calm-theorem", title: "CALM analysis", eyebrow: "Coordination", chapter: showcaseChapters[3], status: "api", summary: "Batch monotone saga steps without coordination; barrier before each non-monotone one.", sources: ["src/obligation/saga.rs", "src/obligation/calm.rs"], docs: ["calm-analysis"] },
+  { id: "fountain-codes", title: "RaptorQ fountain codes", eyebrow: "Data", chapter: showcaseChapters[3], status: "api", summary: "RFC 6330 fountain coding: any sufficient set of symbols rebuilds the data.", sources: ["src/raptorq", "src/raptorq/decoder.rs"], docs: ["atp-architecture", "raptorq-rfc6330"] },
+  { id: "small-step-semantics", title: "Small-step semantics", eyebrow: "Formal", chapter: showcaseChapters[4], status: "model", summary: "The operational semantics behind the runtime, and what Lean has actually checked.", sources: ["asupersync_v4_formal_semantics.md", "formal/lean/Asupersync.lean"], docs: ["formal-semantics"] },
+  { id: "cancel-potential", title: "Cancel potential", eyebrow: "Termination", chapter: showcaseChapters[4], status: "model", summary: "Lean's termination argument: a cancelled task completes in exactly mask + 3 steps.", sources: ["formal/lean/Asupersync.lean"], docs: ["formal-semantics"] },
+  { id: "lyapunov-potential", title: "Lyapunov potential", eyebrow: "Scheduling", chapter: showcaseChapters[4], status: "opt-in", summary: "A weighted measure of outstanding work that the optional governor tries to push down.", sources: ["src/obligation/lyapunov.rs", "src/runtime/config.rs"] },
+  { id: "adaptive-scheduler", title: "Adaptive cancel streaks", eyebrow: "Scheduling", chapter: showcaseChapters[4], status: "opt-in", summary: "The opt-in discounted-UCB1 cancel-streak selector, and why it's off by default.", sources: ["src/runtime/scheduler/three_lane.rs", "src/runtime/config.rs"] },
+  { id: "spectral-deadlock", title: "Spectral wait-graph health", eyebrow: "Diagnostics", chapter: showcaseChapters[4], status: "diagnostic", summary: "An on-demand early-warning diagnostic built on the wait graph's Fiedler value.", sources: ["src/observability/spectral_health.rs"] },
+] as const satisfies readonly ShowcaseDemo[];
+
+export type ShowcaseDemoId = (typeof showcaseDemoList)[number]["id"];
+export const showcaseDemos: readonly (ShowcaseDemo & { id: ShowcaseDemoId })[] = showcaseDemoList;
+
 // Measured against tokio: p50 per operation, n = 1,000, release build with
 // default features, both runtimes in one process, 2026-10-05, three hosts.
 export const benchMicro: BenchRow[] = [

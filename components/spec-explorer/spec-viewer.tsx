@@ -136,9 +136,15 @@ export default function SpecViewer() {
     ],
     []
   );
-  const categoryFilter = activeCategory === "All"
-    ? []
-    : [{ id: "category", value: activeCategory }];
+  // Must be referentially stable: a fresh array on every render invalidates
+  // the filtered row model, whose recompute auto-resets the page index, which
+  // sets table state and renders again. Once a second render happened (the
+  // doc query resolving, a keystroke), that loop ran ~200 times a second and
+  // froze the page on any context update.
+  const categoryFilter = useMemo(
+    () => (activeCategory === "All" ? [] : [{ id: "category", value: activeCategory }]),
+    [activeCategory]
+  );
   // eslint-disable-next-line react-hooks/incompatible-library
   const specTable = useReactTable({
     data: specDocs,
@@ -147,6 +153,8 @@ export default function SpecViewer() {
       globalFilter: searchQuery,
       columnFilters: categoryFilter,
     },
+    // No pagination here, so nothing to reset when the filters change.
+    autoResetPageIndex: false,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     globalFilterFn: (row, _columnId, filterValue) => {
@@ -197,7 +205,7 @@ export default function SpecViewer() {
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && activeDoc) {
+      if (e.key === "Escape" && activeDoc && !e.defaultPrevented) {
         setActiveDoc(null);
       }
     };
