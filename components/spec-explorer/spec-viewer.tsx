@@ -13,7 +13,7 @@ import {
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { cn } from "@/lib/utils";
-import { specDocs, specCategories, specDocHref, type SpecDoc, type SpecCategory } from "@/lib/spec-docs";
+import { specDocs, specCategories, specDocHref, specDocUpstreamPath, type SpecDoc, type SpecCategory } from "@/lib/spec-docs";
 import { SyncContainer } from "@/components/sync-elements";
 import GlitchText from "@/components/glitch-text";
 import { Magnetic } from "@/components/motion-wrapper";
@@ -54,12 +54,10 @@ function headingSlug(text: string): string {
     .replace(/ /g, "-");
 }
 
-// The docs are mirrored from the upstream repo, where they live under docs/
-// (the formal semantics sit at the repo root). Give headings ids, keep links
-// between mirrored docs inside the explorer, and resolve every other relative
-// link against GitHub.
+// Give headings ids, keep links between mirrored docs inside the explorer, and
+// resolve every other relative link against the doc's location upstream.
 function postProcessDocHtml(html: string, filename: string): string {
-  const base = filename === "asupersync_v4_formal_semantics.md" ? UPSTREAM_BLOB : `${UPSTREAM_BLOB}docs/`;
+  const base = new URL(specDocUpstreamPath(filename), UPSTREAM_BLOB);
   const template = document.createElement("template");
   template.innerHTML = html;
 

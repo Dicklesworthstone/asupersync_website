@@ -68,7 +68,7 @@ bun run build
    Most site data lives in `lib/content.ts` and `lib/spec-docs.ts` to keep edits deterministic and reviewable.
 
 3. **Claims track upstream**
-   Every number and guarantee on the site should match the upstream asupersync README and source. When upstream changes (a new release, new benchmark tables, an oracle wired up), update `siteConfig.version`, the benchmark rows, `labOracles`, the roadmap, and the mirrored spec docs together. Code samples come from upstream `examples/` and the README, never invented.
+   Every number and guarantee on the site should match the upstream asupersync README and source. When upstream changes (a new release, new benchmark tables, an oracle wired up), update `siteConfig.version`, the benchmark rows, `labOracles`, the roadmap, and the mirrored spec docs together (`bun run sync:docs ../asupersync` refreshes the docs and flags version drift; read the doc diffs, since site claims may need to follow them). Code samples come from upstream `examples/` and the README, never invented.
 
 4. **Performance over novelty**
    Heavy components are loaded dynamically and interactive sections respect reduced-motion and practical rendering constraints.
@@ -143,13 +143,15 @@ bun dev
 | `bun run build` | Build production bundle | `bun run build` |
 | `bun start` | Run production server | `bun start` |
 | `bun lint` | Run ESLint checks | `bun lint` |
+| `bun run test:e2e` | Build, serve, and run the Playwright smoke suite in `tests/` | `bun run test:e2e` |
+| `bun run sync:docs <checkout>` | Copy changed spec docs from an asupersync checkout into `public/spec-docs/` and report version drift against `siteConfig`; `--check` only reports and exits 1 on drift | `bun run sync:docs ../asupersync --check` |
 
 ### Type Safety + Testing
 
 | Command | Purpose | Example |
 |---|---|---|
 | `bun tsc --noEmit` | Full TS typecheck without output | `bun tsc --noEmit` |
-| `bunx playwright test` | Run E2E tests (if configured) | `bunx playwright test` |
+| `bunx playwright test` | Run the smoke suite; set `PLAYWRIGHT_REUSE_SERVER=1` to test a server you already started on port 3100 | `PLAYWRIGHT_REUSE_SERVER=1 bunx playwright test` |
 | `bunx playwright install` | Install Playwright browsers | `bunx playwright install` |
 
 ### Issue Tracking (`br` / beads_rust)

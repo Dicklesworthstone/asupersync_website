@@ -7,6 +7,15 @@ export interface SpecDoc {
   order: number;
 }
 
+/**
+ * Where a mirrored doc lives in the upstream repo. Everything is under docs/
+ * except the formal semantics, whose canonical copy is at the repo root
+ * (docs/ holds only a redirect stub).
+ */
+export function specDocUpstreamPath(filename: string): string {
+  return filename === "asupersync_v4_formal_semantics.md" ? filename : `docs/${filename}`;
+}
+
 /** Link to a mirrored doc in the spec explorer, optionally at a heading. */
 export function specDocHref(slug: string, hash?: string): string {
   return `/spec-explorer?doc=${slug}${hash ? `#${hash}` : ""}`;

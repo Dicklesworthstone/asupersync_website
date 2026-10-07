@@ -359,7 +359,7 @@ export const tokioMappings: TokioMapping[] = [
   {
     tokio: "tokio::select!",
     asupersync: "race!(cx, { … })",
-    note: "Returns only after the losers have been cancelled and drained.",
+    note: "Returns only after every loser, and anything a loser spawned, has been cancelled and drained.",
   },
   {
     tokio: "FuturesUnordered",

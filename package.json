@@ -12,7 +12,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "sync:docs": "bun scripts/sync-spec-docs.ts"
   },
   "dependencies": {
     "@tanstack/react-form": "^1.28.3",
