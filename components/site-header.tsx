@@ -95,7 +95,7 @@ export default function SiteHeader() {
             </div>
 
             {/* Navigation */}
-            <nav className="flex flex-1 min-w-0 items-center justify-center gap-1 h-full">
+            <nav aria-label="Main" className="flex flex-1 min-w-0 items-center justify-center gap-1 h-full">
               {navItems.map((item) => {
                 const active = pathname === item.href || (item.href !== "/" && pathname?.startsWith(item.href));
                 return (
@@ -123,11 +123,11 @@ export default function SiteHeader() {
             <div className="flex items-center justify-end gap-2 shrink-0">
               <button
                 onClick={() => setPaletteOpen(true)}
-                aria-label="Search the site"
                 aria-keyshortcuts="Control+K Meta+K"
                 className="flex items-center gap-2 h-9 pl-3 pr-2 rounded-lg border border-white/10 bg-white/[0.03] text-slate-400 hover:text-white hover:border-blue-500/30 transition-colors"
               >
-                <Search className="h-3.5 w-3.5" />
+                <Search className="h-3.5 w-3.5" aria-hidden="true" />
+                <span className="sr-only">Search the site</span>
                 <kbd className="hidden xl:inline text-[10px] font-bold tracking-wider text-slate-500">⌘K</kbd>
               </button>
               <button onClick={toggleLabMode} aria-label="Toggle Lab Mode" aria-pressed={isLabMode} className={cn("p-2 rounded-lg transition-colors", isLabMode ? "text-blue-400 bg-blue-500/10" : "text-slate-400 hover:text-white hover:bg-white/5")}>
@@ -146,7 +146,7 @@ export default function SiteHeader() {
 
       {/* MOBILE BOTTOM NAV */}
       <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 lg:hidden w-[90%] max-w-md pointer-events-none">
-        <nav className="glass-modern h-16 rounded-2xl border border-white/10 flex items-center justify-around px-2 pointer-events-auto shadow-2xl">
+        <nav aria-label="Main (mobile)" className="glass-modern h-16 rounded-2xl border border-white/10 flex items-center justify-around px-2 pointer-events-auto shadow-2xl">
           {navItems.slice(0, 4).map((item) => {
             const active = pathname === item.href || (item.href !== "/" && pathname?.startsWith(item.href));
             const Icon = getIcon(item.label);
@@ -174,7 +174,7 @@ export default function SiteHeader() {
           })}
           <button
             onClick={() => setOpen(true)}
-            aria-label="Open navigation menu"
+            aria-label="More: open navigation menu"
             aria-expanded={open}
             className="flex flex-col items-center justify-center w-12 h-12 rounded-xl text-slate-500 active:scale-90"
           >
@@ -208,7 +208,7 @@ export default function SiteHeader() {
                 </button>
               </div>
 
-              <nav className="flex flex-col gap-6">
+              <nav aria-label="All pages" className="flex flex-col gap-6">
                 {navItems.map((item) => (
                   <Link
                     key={item.href}

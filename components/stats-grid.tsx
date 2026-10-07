@@ -25,7 +25,7 @@ function parseStatValue(value: string): {
 }
 
 export default function StatsGrid({ stats }: { stats: Stat[] }) {
-  const containerRef = useRef<HTMLDListElement>(null);
+  const containerRef = useRef<HTMLUListElement>(null);
   const [isVisible, setIsVisible] = useState(false);
 
   const parsedStats = useMemo(
@@ -59,12 +59,12 @@ export default function StatsGrid({ stats }: { stats: Stat[] }) {
 
   return (
     <SyncContainer withPulse={true} className="overflow-hidden border-blue-500/10">
-      <dl
+      <ul
         ref={containerRef}
         className="grid gap-px overflow-hidden text-sm text-slate-200 sm:grid-cols-2 lg:grid-cols-4 bg-white/5"
       >
         {parsedStats.map(({ stat, parsed }, index) => (
-          <div
+          <li
             key={stat.label}
             className="group relative bg-[#020a14]/80 px-6 py-10 backdrop-blur transition-all duration-500 hover:bg-[#020a14]/40"
           >
@@ -76,14 +76,14 @@ export default function StatsGrid({ stats }: { stats: Stat[] }) {
             <SyncNode className="absolute top-2 right-2 opacity-10 group-hover:opacity-100 transition-opacity scale-75" />
             <SyncNode className="absolute bottom-2 left-2 opacity-10 group-hover:opacity-100 transition-opacity scale-75" />
 
-            <dt className="relative z-10">
+            <div className="relative z-10">
               <GlitchText trigger="hover" intensity="low">
                 <span className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 transition-colors group-hover:text-blue-400/70">
                   {stat.label}
                 </span>
               </GlitchText>
-            </dt>
-            <dd className="relative z-10 mt-4 text-4xl font-black tracking-tight text-white transition-[filter] duration-500 group-hover:drop-shadow-[0_0_15px_rgba(59,130,246,0.5)] sm:text-5xl tabular-nums">
+            </div>
+            <div className="relative z-10 mt-4 text-4xl font-black tracking-tight text-white transition-[filter] duration-500 group-hover:drop-shadow-[0_0_15px_rgba(59,130,246,0.5)] sm:text-5xl tabular-nums">
               {parsed.isAnimatable ? (
                 <AnimatedNumber
                   value={parsed.number}
@@ -94,15 +94,15 @@ export default function StatsGrid({ stats }: { stats: Stat[] }) {
               ) : (
                 stat.value
               )}
-            </dd>
+            </div>
             {stat.helper && (
               <p className="relative z-10 mt-3 text-[10px] font-bold uppercase tracking-widest text-slate-600 leading-relaxed group-hover:text-slate-400 transition-colors">
                 {stat.helper}
               </p>
             )}
-          </div>
+          </li>
         ))}
-      </dl>
+      </ul>
     </SyncContainer>
   );
 }

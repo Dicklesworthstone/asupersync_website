@@ -604,7 +604,7 @@ export default function ArchitecturePage() {
           Interactive demos
           <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
         </Link>
-        <Link href="/getting-started" className="group inline-flex items-center gap-2 rounded-full bg-blue-500 px-6 py-3 text-sm font-bold text-white hover:bg-blue-400 transition-all active:scale-95">
+        <Link href="/getting-started" className="group inline-flex items-center gap-2 rounded-full bg-blue-600 px-6 py-3 text-sm font-bold text-white hover:bg-blue-400 transition-all active:scale-95">
           Get started
           <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
         </Link>

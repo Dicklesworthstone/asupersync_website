@@ -13,10 +13,10 @@ interface Task {
 }
 
 const TASKS: Task[] = [
-  { id: "A", label: "Task A: parse config", color: "#3B82F6", duration: 0.85 },
-  { id: "B", label: "Task B: build graph", color: "#22c55e", duration: 0.65 },
-  { id: "C", label: "Task C: sync state", color: "#F97316", duration: 1.0 },
-  { id: "D", label: "Task D: emit events", color: "#8B5CF6", duration: 0.55 },
+  { id: "A", label: "Task A: parse config", color: "#2563EB", duration: 0.85 },
+  { id: "B", label: "Task B: build graph", color: "#15803D", duration: 0.65 },
+  { id: "C", label: "Task C: sync state", color: "#C2410C", duration: 1.0 },
+  { id: "D", label: "Task D: emit events", color: "#7C3AED", duration: 0.55 },
 ];
 
 /* ── Seeded PRNG (mulberry32) ─────────────────────────────────────── */
@@ -124,7 +124,7 @@ function TimelinePanel({
                   />
                   {/* Label */}
                   <div className="relative z-10 flex items-center h-full px-3">
-                    <span className="text-[11px] font-bold text-white/90 truncate">
+                    <span className="text-[11px] font-bold text-white truncate">
                       {task.label}
                     </span>
                   </div>

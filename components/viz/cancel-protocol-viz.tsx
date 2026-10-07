@@ -294,7 +294,7 @@ export default function CancelProtocolViz() {
         <button
           onClick={triggerCancel}
           disabled={isAnimating || phase === "Completed"}
-          className="rounded-lg px-5 py-2 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
+          className="rounded-lg px-5 py-2 text-sm font-semibold text-slate-950 transition disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
           style={{ background: "#F97316" }}
         >
           Trigger Cancel

@@ -179,7 +179,7 @@ export default function GettingStartedPage() {
           {onrampLevels.map((level) => (
             <div key={level.level} className="grid gap-8 lg:grid-cols-12 items-start">
               <div className="lg:col-span-4 space-y-3 lg:sticky lg:top-28">
-                <div className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-500/80">
+                <div className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-400/80">
                   Level {level.level}
                 </div>
                 <h3 className="text-2xl font-black text-white">{level.title}</h3>
@@ -258,7 +258,7 @@ export default function GettingStartedPage() {
                 <div className="text-slate-400 font-mono text-sm">{habit.instead}</div>
               </div>
               <div className="md:col-span-3">
-                <div className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-500/70 mb-1">Write</div>
+                <div className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-400/80 mb-1">Write</div>
                 <div className="text-blue-300 font-mono text-sm">{habit.write}</div>
               </div>
               <p className="md:col-span-6 text-slate-400 leading-relaxed text-sm">{habit.why}</p>
@@ -276,7 +276,7 @@ export default function GettingStartedPage() {
         kicker="The default build is deliberately small. These are the features applications reach for most."
       >
         <SyncContainer className="overflow-hidden border-blue-500/10">
-          <div className="overflow-x-auto">
+          <div tabIndex={0} role="region" aria-label="Common Cargo features" className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <caption className="sr-only">Common Cargo features</caption>
               <thead>

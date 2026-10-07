@@ -162,7 +162,7 @@ export default function AtpBondingViz() {
         </button>
       </div>
 
-      <div className="rounded-xl border border-white/5 bg-black/40 p-2 overflow-x-auto">
+      <div tabIndex={0} role="region" aria-label="Bonded transfer diagram" className="rounded-xl border border-white/5 bg-black/40 p-2 overflow-x-auto">
         <svg viewBox="0 0 720 320" className="w-full h-auto min-w-[560px]" role="img" aria-label={`Bonded transfer: ${aliveCount} of 3 donors alive, ${Math.round(sim.progress)} percent complete.`}>
           {/* Paths */}
           {paths.map((p, i) => (

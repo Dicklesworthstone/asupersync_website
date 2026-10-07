@@ -233,7 +233,7 @@ export default function RustCodeBlock({ code, title }: { code: string; title?: s
         </button>
       </div>
 
-      <div className="overflow-x-auto relative z-10">
+      <div tabIndex={0} role="region" aria-label={title ? `Code: ${title}` : "Code example"} className="overflow-x-auto relative z-10">
         <AnimatePresence>
           {copied && (
             <motion.div

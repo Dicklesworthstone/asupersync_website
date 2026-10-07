@@ -127,7 +127,7 @@ export default function AtpLossCollapseViz() {
       </div>
 
       {/* Chart */}
-      <div className="rounded-xl border border-white/5 bg-black/40 p-4 overflow-x-auto">
+      <div tabIndex={0} role="region" aria-label="Throughput chart" className="rounded-xl border border-white/5 bg-black/40 p-4 overflow-x-auto">
         <svg viewBox={`0 0 ${CHART.w} ${CHART.h}`} className="w-full h-auto min-w-[420px]" role="img" aria-label={`Throughput vs packet loss at ${rttMs} milliseconds round-trip time. TCP: ${formatMbit(tcp)}. atp: ${formatMbit(atp)}.`}>
           <defs>
             <linearGradient id="atpAreaFill" x1="0" y1="0" x2="0" y2="1">

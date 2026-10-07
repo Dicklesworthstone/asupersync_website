@@ -20,7 +20,7 @@ export default function GlobalError({
           )}
           <button
             onClick={reset}
-            className="rounded-full bg-blue-500 px-6 py-3 text-sm font-bold text-white hover:bg-blue-400 transition-colors active:scale-95"
+            className="rounded-full bg-blue-600 px-6 py-3 text-sm font-bold text-white hover:bg-blue-400 transition-colors active:scale-95"
           >
             Try again
           </button>

@@ -351,7 +351,7 @@ export default function SpecViewer() {
                 className="flex flex-col items-center justify-center h-full min-h-[60vh] text-center"
               >
                 <FileText className="h-16 w-16 text-blue-500/20 mb-6" />
-                <h3 className="text-2xl font-black text-white mb-3">Select a Document</h3>
+                <h2 className="text-2xl font-black text-white mb-3">Select a Document</h2>
                 <p className="text-sm text-slate-500 max-w-sm">
                   Choose a spec doc from the sidebar to view its contents.
                   Use <kbd className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] font-bold">/</kbd> to search.
@@ -528,14 +528,14 @@ function DocListItem({
           )}
         >
           <div className="flex items-center justify-between">
-            <h4
+            <span
               className={cn(
                 "text-sm font-bold transition-colors line-clamp-1",
                 active ? "text-blue-400" : "text-white group-hover:text-blue-400"
               )}
             >
               {doc.title}
-            </h4>
+            </span>
             <ChevronRight
               className={cn(
                 "h-3.5 w-3.5 shrink-0 transition-all",

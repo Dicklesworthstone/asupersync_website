@@ -201,7 +201,7 @@ export default function OracleDashboardViz() {
           onClick={runTest}
           disabled={isRunning}
           className="rounded-lg px-6 py-2.5 text-sm font-bold text-white transition disabled:cursor-not-allowed disabled:opacity-40"
-          style={{ background: "#8B5CF6" }}
+          style={{ background: "#7C3AED" }}
         >
           Run Test
         </button>

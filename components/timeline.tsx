@@ -27,7 +27,7 @@ export default function Timeline({ items }: { items: ChangelogEntry[] }) {
 
               <div className="grid lg:grid-cols-12 gap-8 items-start">
                 <div className="lg:col-span-3 pt-1">
-                  <span className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-500/60 group-hover:text-blue-400 transition-colors">
+                  <span className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-400/80 group-hover:text-blue-400 transition-colors">
                     {item.period}
                   </span>
                 </div>

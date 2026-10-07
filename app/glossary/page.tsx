@@ -163,7 +163,7 @@ export default function GlossaryPage() {
                       style={{ transform: `translateY(${virtualItem.start}px)` }}
                     >
                       {row.type === "heading" ? (
-                        <h2 className="text-sm font-black text-blue-500/60 uppercase tracking-[0.4em] pb-3 pt-5">
+                        <h2 className="text-sm font-black text-blue-400/80 uppercase tracking-[0.4em] pb-3 pt-5">
                           {row.letter}
                         </h2>
                       ) : (

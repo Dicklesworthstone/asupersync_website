@@ -408,7 +408,7 @@ export default function ShowcasePage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           {CHAPTERS.map((chapter) => (
             <div key={chapter.title} className="rounded-2xl border border-white/5 bg-white/[0.02] p-5">
-              <div className="text-[10px] font-black uppercase tracking-[0.25em] text-blue-500/80 mb-3">{chapter.title}</div>
+              <div className="text-[10px] font-black uppercase tracking-[0.25em] text-blue-400/80 mb-3">{chapter.title}</div>
               <ul className="space-y-1.5">
                 {chapter.demos.map((demo) => (
                   <li key={demo.id}>

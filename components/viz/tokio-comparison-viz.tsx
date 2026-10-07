@@ -523,7 +523,7 @@ export default function TokioComparisonViz() {
           <motion.p
             key="hint"
             className="pb-4 text-center font-mono text-xs"
-            style={{ color: `${BLUE_GLOW}44` }}
+            style={{ color: `${BLUE_GLOW}cc` }}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}

@@ -58,7 +58,7 @@ export default function ComparisonTable() {
 
   return (
     <SyncContainer withPulse={true} className="overflow-hidden border-blue-500/10">
-      <div className="overflow-x-auto">
+      <div tabIndex={0} role="region" aria-label="Async runtime feature comparison" className="overflow-x-auto">
         <table className="w-full text-left" aria-label="Async runtime feature comparison">
           <thead>
             {table.getHeaderGroups().map((headerGroup) => (

@@ -131,7 +131,7 @@ const SURPRISES = [
 function BenchTable({ rows, ratioHeader, caption }: { rows: BenchRow[]; ratioHeader: string; caption: string }) {
   return (
     <SyncContainer className="overflow-hidden border-blue-500/10">
-      <div className="overflow-x-auto">
+      <div tabIndex={0} role="region" aria-label={caption} className="overflow-x-auto">
         <table className="w-full text-left text-sm">
           <caption className="sr-only">{caption}</caption>
           <thead>
@@ -211,7 +211,7 @@ export default function HomePage() {
                 <Link
                   href="/getting-started"
                   data-magnetic="true"
-                  className="relative px-10 py-5 rounded-2xl bg-blue-500 text-white font-black text-lg hover:bg-white hover:text-black transition-all flex items-center justify-center gap-3 shadow-[0_0_40px_rgba(59,130,246,0.3)] active:scale-95"
+                  className="relative px-10 py-5 rounded-2xl bg-blue-600 text-white font-black text-lg hover:bg-white hover:text-black transition-all flex items-center justify-center gap-3 shadow-[0_0_40px_rgba(59,130,246,0.3)] active:scale-95"
                 >
                   <span className="absolute inset-0 rounded-2xl animate-pulse bg-blue-400/20" />
                   <Rocket className="relative h-5 w-5" />
@@ -561,7 +561,7 @@ export default function HomePage() {
       >
         <div className="space-y-12">
           <SyncContainer className="overflow-hidden border-blue-500/10">
-            <div className="overflow-x-auto">
+            <div tabIndex={0} role="region" aria-label="tokio primitives and their Asupersync equivalents" className="overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <caption className="sr-only">tokio primitives and their Asupersync equivalents</caption>
                 <thead>
@@ -587,7 +587,7 @@ export default function HomePage() {
           <div className="grid gap-6 md:grid-cols-3">
             {SURPRISES.map((s, i) => (
               <div key={s.title} className="rounded-2xl border border-white/5 bg-white/[0.02] p-8">
-                <div className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-500/70 mb-3">
+                <div className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-400/80 mb-3">
                   Surprise {i + 1}
                 </div>
                 <h3 className="text-xl font-black text-white mb-3">{s.title}</h3>

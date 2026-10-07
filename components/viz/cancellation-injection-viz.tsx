@@ -75,7 +75,7 @@ export default function CancellationInjectionViz() {
         <button
           onClick={startSimulation}
           disabled={runState === "running"}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all bg-orange-600 text-white hover:bg-orange-500 disabled:opacity-50"
+          className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all bg-orange-700 text-white hover:bg-orange-600 disabled:opacity-50"
         >
           {runState === "failed" ? <RotateCcw className="h-4 w-4" /> : <FastForward className="h-4 w-4" />}
           {runState === "failed" ? "Restart Scan" : "Start Injection Run"}

@@ -83,7 +83,7 @@ export default function SporkOtpViz() {
         </div>
       </div>
 
-      <div className="relative min-h-[16rem] py-8 flex items-center justify-between px-4 sm:px-12 border border-white/5 bg-black/40 rounded-xl overflow-x-auto">
+      <div tabIndex={0} role="region" aria-label="GenServer call diagram" className="relative min-h-[16rem] py-8 flex items-center justify-between px-4 sm:px-12 border border-white/5 bg-black/40 rounded-xl overflow-x-auto">
          
          {/* Client Task */}
          <div className="flex flex-col items-center z-10 min-w-[100px]">

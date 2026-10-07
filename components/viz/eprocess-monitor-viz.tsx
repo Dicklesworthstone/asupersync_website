@@ -246,8 +246,8 @@ export default function EProcessMonitorViz() {
       <div className="mt-5 flex flex-wrap justify-center gap-3">
         <button
           onClick={isRunning ? stop : start}
-          className="rounded-lg px-5 py-2 text-sm font-medium text-white transition"
-          style={{ background: isRunning ? "#EAB308" : "#A855F7" }}
+          className={`rounded-lg px-5 py-2 text-sm font-medium transition ${isRunning ? "text-slate-950" : "text-white"}`}
+          style={{ background: isRunning ? "#EAB308" : "#9333EA" }}
         >
           {isRunning ? "Pause" : "Start Monitoring"}
         </button>
@@ -256,7 +256,7 @@ export default function EProcessMonitorViz() {
           className={`rounded-lg px-5 py-2 text-sm font-medium text-white transition ${
             injectViolation ? "ring-2 ring-red-500/50" : ""
           }`}
-          style={{ background: injectViolation ? "#EF4444" : "#334155" }}
+          style={{ background: injectViolation ? "#DC2626" : "#334155" }}
         >
           {injectViolation ? "Injecting Violations" : "Inject Violations"}
         </button>

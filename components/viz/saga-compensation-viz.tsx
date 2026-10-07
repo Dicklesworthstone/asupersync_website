@@ -97,7 +97,7 @@ export default function SagaCompensationViz() {
         <button
           onClick={runSaga}
           disabled={status === "running" || status === "rolling-back"}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50"
+          className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all bg-emerald-700 text-white hover:bg-emerald-600 disabled:opacity-50"
         >
           {status === "compensated" ? <RotateCcw className="h-4 w-4" /> : <ArrowRight className="h-4 w-4" />}
           {status === "compensated" ? "Restart Saga" : "Execute Checkout Saga"}

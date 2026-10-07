@@ -224,7 +224,7 @@ export default function AtpProtocolFlowViz() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-white/5 bg-black/40 p-2 overflow-x-auto">
+      <div tabIndex={0} role="region" aria-label="Protocol diagram" className="rounded-xl border border-white/5 bg-black/40 p-2 overflow-x-auto">
         <svg viewBox="0 0 720 300" className="w-full h-auto min-w-[560px]" role="img" aria-label={`Protocol step ${step + 1} of ${STEPS.length}: ${STEPS[step].title}`}>
           {/* Lane labels */}
           <text x={(LANE_START + LANE_END) / 2} y={CONTROL_Y - 24} textAnchor="middle" className="fill-slate-500 text-[9px] font-black tracking-widest uppercase">

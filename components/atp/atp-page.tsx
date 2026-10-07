@@ -395,7 +395,7 @@ export default function AtpPage() {
                       target="_blank"
                       rel="noopener noreferrer"
                       data-magnetic="true"
-                      className="inline-flex items-center gap-2 rounded-2xl bg-blue-500 px-6 py-3 text-sm font-black text-white shadow-[0_0_40px_rgba(59,130,246,0.3)] hover:bg-blue-400 transition-all active:scale-95"
+                      className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-6 py-3 text-sm font-black text-white shadow-[0_0_40px_rgba(59,130,246,0.3)] hover:bg-blue-400 transition-all active:scale-95"
                     >
                       GitHub
                       <ArrowRight className="h-4 w-4" />

@@ -69,7 +69,7 @@ export default function TestOraclesViz() {
         <button
           onClick={startTest}
           disabled={testState === "monitoring"}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50"
+          className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all bg-emerald-700 text-white hover:bg-emerald-600 disabled:opacity-50"
         >
           {testState === "rejected" ? <RotateCcwIcon className="h-4 w-4" /> : <Play className="h-4 w-4" />}
           {testState === "rejected" ? "Restart" : "Run Seeds"}

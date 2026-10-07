@@ -64,7 +64,7 @@ export default function SectionShell({
             {eyebrow && (
               <div className="inline-flex items-center gap-3 mb-8">
                 <div className="h-px w-8 bg-blue-500/40" />
-                <span className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-500/80">
+                <span className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-400/80">
                   {eyebrow}
                 </span>
               </div>

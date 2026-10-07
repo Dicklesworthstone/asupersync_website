@@ -38,7 +38,7 @@ export default function FoataFingerprintViz() {
       <div className="grid grid-cols-1 md:grid-cols-12 gap-6 relative">
         
         {/* Timeline Visualization */}
-        <div className="md:col-span-8 flex flex-col gap-6 p-6 border border-white/5 bg-black/40 rounded-xl overflow-x-auto">
+        <div tabIndex={0} role="region" aria-label="Thread interleaving timeline" className="md:col-span-8 flex flex-col gap-6 p-6 border border-white/5 bg-black/40 rounded-xl overflow-x-auto">
            
            <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 mb-2 flex items-center justify-between min-w-[320px]">
               <span>Thread Interleaving</span>

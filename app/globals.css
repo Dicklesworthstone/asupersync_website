@@ -1,5 +1,20 @@
 @import "tailwindcss";
 
+/* Muted text sits on near-black backgrounds, where Tailwind's default
+   slate-500 (#62748e) measures 3.6-4.3:1, under WCAG AA's 4.5:1 for body
+   text, and slate-600 about 2.5:1. Same hue, same 500-over-600 ordering. */
+@theme {
+  --color-slate-500: #7788a2;
+  --color-slate-600: #64748b;
+}
+
+/* Wide tables, code, and diagrams scroll sideways on small screens; they are
+   tab stops so keyboard users can scroll them too. */
+[role="region"][tabindex="0"]:focus-visible {
+  outline: 2px solid rgba(96, 165, 250, 0.7);
+  outline-offset: -2px;
+}
+
 /* ==========================================================================
    Asupersync - Global Styles
    Stripe-Grade Technical Design System

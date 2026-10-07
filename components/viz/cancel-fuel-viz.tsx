@@ -102,7 +102,7 @@ export default function CancelFuelViz() {
 
         <button
           onClick={advance}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all bg-orange-600 text-white hover:bg-orange-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-400 disabled:opacity-50"
+          className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all bg-orange-700 text-white hover:bg-orange-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-400 disabled:opacity-50"
         >
           {phase === "Running" ? (
             <PowerOff className="h-4 w-4" />
@@ -153,7 +153,7 @@ export default function CancelFuelViz() {
                         {PHASE_LABELS[p]}
                      </span>
                      {p === "CancelRequested" && (
-                        <div className="flex gap-1" aria-label={`Mask units left: ${mask}`}>
+                        <div className="flex gap-1" role="img" aria-label={`Mask units left: ${mask}`}>
                            {Array.from({ length: maskDepth }, (_, k) => (
                               <span
                                  key={k}

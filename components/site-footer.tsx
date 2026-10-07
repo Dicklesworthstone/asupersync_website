@@ -50,7 +50,7 @@ export default function SiteFooter() {
               </div>
 
               <div className="flex flex-col gap-3">
-                 <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-[0.3em] text-blue-500/60">
+                 <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-[0.3em] text-blue-400/80">
                     <motion.div
                       animate={
                         prefersReducedMotion
@@ -76,8 +76,8 @@ export default function SiteFooter() {
             {/* NAVIGATION */}
             <div className="md:col-span-4 grid grid-cols-2 gap-8 text-left">
               <div className="space-y-6">
-                <h4 className="text-[10px] font-black uppercase tracking-[0.4em] text-white/20">Runtime</h4>
-                <nav className="flex flex-col gap-4">
+                <h2 id="footer-nav-runtime" className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">Runtime</h2>
+                <nav aria-labelledby="footer-nav-runtime" className="flex flex-col gap-4">
                   {navItems.slice(0, 3).map((item) => (
                     <Link key={item.href} href={item.href} className="text-sm font-bold text-slate-500 hover:text-blue-400 transition-colors uppercase tracking-widest hover:translate-x-1 duration-200">
                       {item.label}
@@ -86,8 +86,8 @@ export default function SiteFooter() {
                 </nav>
               </div>
               <div className="space-y-6">
-                <h4 className="text-[10px] font-black uppercase tracking-[0.4em] text-white/20">Resources</h4>
-                <nav className="flex flex-col gap-4">
+                <h2 id="footer-nav-resources" className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">Resources</h2>
+                <nav aria-labelledby="footer-nav-resources" className="flex flex-col gap-4">
                   {navItems.slice(3).map((item) => (
                     <Link key={item.href} href={item.href} className="text-sm font-bold text-slate-500 hover:text-blue-400 transition-colors uppercase tracking-widest hover:translate-x-1 duration-200">
                       {item.label}

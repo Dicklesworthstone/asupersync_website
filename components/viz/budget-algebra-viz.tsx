@@ -100,7 +100,7 @@ function BudgetNode({ title, localDeadline, localPriority, effDeadline, effPrior
                      <span className="font-mono text-blue-400 font-medium">{localDeadline}s</span>
                   </div>
                   <input 
-                     type="range" min="1" max="20" value={localDeadline} 
+                     type="range" min="1" max="20" value={localDeadline} aria-label={`${title} deadline, seconds`}
                      onChange={(e) => setDeadline(parseInt(e.target.value))}
                      className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/50 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-500 hover:[&::-webkit-slider-thumb]:bg-blue-400 transition-all"
                   />
@@ -112,7 +112,7 @@ function BudgetNode({ title, localDeadline, localPriority, effDeadline, effPrior
                      <span className="font-mono text-orange-400 font-medium">P{localPriority}</span>
                   </div>
                   <input 
-                     type="range" min="1" max="5" value={localPriority} 
+                     type="range" min="1" max="5" value={localPriority} aria-label={`${title} priority`}
                      onChange={(e) => setPriority(parseInt(e.target.value))}
                      className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-orange-500/50 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-orange-500 hover:[&::-webkit-slider-thumb]:bg-orange-400 transition-all"
                   />
