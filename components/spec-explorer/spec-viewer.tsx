@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback, useDeferredValue } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -17,7 +17,7 @@ import { specDocs, specCategories, specDocHref, specDocUpstreamPath, type SpecDo
 import { SyncContainer } from "@/components/sync-elements";
 import GlitchText from "@/components/glitch-text";
 import { Magnetic } from "@/components/motion-wrapper";
-import SpecSearch from "./spec-search";
+import SpecSearch, { buildSections, searchSections, SpecTextResults, MIN_TEXT_QUERY, type SpecHitGroup } from "./spec-search";
 
 const categoryIcons: Record<SpecCategory, React.ComponentType<{ className?: string }>> = {
   "Start Here": Rocket,
@@ -98,6 +98,21 @@ function postProcessDocHtml(html: string, filename: string): string {
   return template.innerHTML;
 }
 
+// Opening another doc changes the rendered html, and DocBody then scrolls to
+// the URL's #heading. Inside the open doc nothing re-renders, so scroll here.
+function navigateInExplorer(href: string) {
+  const target = new URL(href, window.location.href);
+  const sameDoc = target.searchParams.get("doc") === new URLSearchParams(window.location.search).get("doc");
+  window.history.pushState(null, "", href);
+  const id = decodeURIComponent(target.hash.slice(1));
+  if (!sameDoc || !id) return;
+  for (const body of document.querySelectorAll<HTMLElement>(".spec-prose")) {
+    // Skip the copy in the layout that is hidden at this width.
+    if (body.getClientRects().length === 0) continue;
+    body.querySelector<HTMLElement>(`[id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+}
+
 async function loadSpecDocHtml(filename: string, signal?: AbortSignal): Promise<string> {
   const res = await fetch(`/spec-docs/${filename}`, { signal });
   if (!res.ok) {
@@ -121,6 +136,9 @@ export default function SpecViewer() {
   // when one open doc replaces another.
   const setActiveDoc = useCallback((doc: SpecDoc | null) => {
     window.history.pushState(null, "", doc ? specDocHref(doc.slug) : "/spec-explorer");
+  }, []);
+  const openSection = useCallback((doc: SpecDoc, headingId: string | null) => {
+    navigateInExplorer(specDocHref(doc.slug, headingId ?? undefined));
   }, []);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<SpecCategory | "All">("All");
@@ -193,6 +211,35 @@ export default function SpecViewer() {
   });
   const error = queryError instanceof Error ? queryError.message : null;
 
+  // Full-text search loads every doc on the first long-enough query. Going
+  // through the per-doc cache means a hit opens instantly afterwards.
+  const deferredQuery = useDeferredValue(searchQuery);
+  const textSearchActive = deferredQuery.trim().length >= MIN_TEXT_QUERY;
+  const { data: sections, isPending: indexing } = useQuery({
+    queryKey: ["spec-sections"],
+    queryFn: async () => {
+      const htmls = await Promise.all(
+        specDocs.map((doc) =>
+          queryClient.ensureQueryData({
+            queryKey: ["spec-doc", doc.filename],
+            queryFn: ({ signal }) => loadSpecDocHtml(doc.filename, signal),
+            staleTime: Infinity,
+          })
+        )
+      );
+      return specDocs.flatMap((doc, i) => buildSections(doc, htmls[i]!));
+    },
+    enabled: textSearchActive,
+    staleTime: Infinity,
+  });
+  const textHits = useMemo<SpecHitGroup[]>(
+    () => (textSearchActive && sections ? searchSections(sections, deferredQuery) : []),
+    [textSearchActive, sections, deferredQuery]
+  );
+  const textSearch = textSearchActive
+    ? { query: deferredQuery, groups: textHits, loading: indexing, onOpen: openSection }
+    : null;
+
   const prefetchDoc = (doc: SpecDoc) => {
     void queryClient.prefetchQuery({
       queryKey: ["spec-doc", doc.filename],
@@ -252,6 +299,7 @@ export default function SpecViewer() {
                 activeDoc={activeDoc}
                 onSelect={setActiveDoc}
                 onPrefetch={prefetchDoc}
+                textSearch={textSearch}
               />
             </motion.div>
           )}
@@ -271,6 +319,7 @@ export default function SpecViewer() {
               activeDoc={activeDoc}
               onSelect={setActiveDoc}
               onPrefetch={prefetchDoc}
+              textSearch={textSearch}
             />
           </div>
         </div>
@@ -318,6 +367,7 @@ function Sidebar({
   activeDoc,
   onSelect,
   onPrefetch,
+  textSearch,
 }: {
   activeCategory: SpecCategory | "All";
   setActiveCategory: (c: SpecCategory | "All") => void;
@@ -327,6 +377,7 @@ function Sidebar({
   activeDoc: SpecDoc | null;
   onSelect: (doc: SpecDoc) => void;
   onPrefetch: (doc: SpecDoc) => void;
+  textSearch: React.ComponentProps<typeof SpecTextResults> | null;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -417,12 +468,16 @@ function Sidebar({
             })}
           </div>
         </div>
+      ) : textSearch ? (
+        <p className="px-1 text-xs text-slate-600">No titles match.</p>
       ) : (
         <div className="text-center py-12">
           <AlertCircle className="h-8 w-8 text-slate-700 mx-auto mb-3" />
           <p className="text-sm text-slate-600">No docs match your search.</p>
         </div>
       )}
+
+      {textSearch && <SpecTextResults {...textSearch} />}
     </div>
   );
 }
@@ -583,7 +638,7 @@ function DocBody({ html }: { html: string }) {
         window.history.replaceState(window.history.state, "", href);
       } else if (href.startsWith("/spec-explorer?")) {
         e.preventDefault();
-        window.history.pushState(null, "", href);
+        navigateInExplorer(href);
       }
     },
     []

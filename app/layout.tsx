@@ -23,11 +23,6 @@ export const metadata: Metadata = {
   },
   description: siteConfig.description,
   metadataBase: new URL(siteConfig.url),
-  icons: {
-    icon: [
-      { url: "/favicon.ico", sizes: "48x48" },
-    ],
-  },
   openGraph: {
     title: siteConfig.title,
     description: siteConfig.description,

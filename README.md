@@ -30,7 +30,7 @@ git clone <your-repo-url> asupersync_website && cd asupersync_website && bun ins
 | Capability | What You Get |
 |---|---|
 | **Interactive demos** | 25 visualizations on `/showcase`, each labeled with how the mechanism ships (on by default, API, lab-only, opt-in, diagnostic, or formal model), plus five on `/atp` |
-| **Spec Explorer** | Browser for 30 design docs mirrored verbatim from the upstream repo into `public/spec-docs/`, with relative links resolved to GitHub |
+| **Spec Explorer** | Browser for 30 design docs mirrored verbatim from the upstream repo into `public/spec-docs/`: full-text search that jumps to the matching section, shareable `?doc=slug#heading` links, relative links resolved to GitHub |
 | **Structured content model** | Centralized content in `lib/content.ts` and `lib/spec-docs.ts` for maintainable updates |
 | **Modern frontend stack** | Next.js 16 App Router + React 19 + strict TypeScript + Tailwind 4 + framer-motion |
 | **Performance-aware UX** | Dynamic imports for heavy visualizations, reduced-motion support, and virtualized large lists |

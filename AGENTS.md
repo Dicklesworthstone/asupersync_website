@@ -193,7 +193,7 @@ The mirrored doc registry is `lib/spec-docs.ts`. When adding content, edit these
 
 ### Spec Docs (Markdown)
 
-The files in `public/spec-docs/` are upstream docs copied verbatim; never edit them by hand. `components/spec-explorer/spec-viewer.tsx` fetches one, renders it with marked, sanitizes it with DOMPurify, adds heading anchors, keeps links between mirrored docs inside the explorer, and resolves other relative links to GitHub. The open doc lives in the URL (`/spec-explorer?doc=<slug>#<heading>`).
+The files in `public/spec-docs/` are upstream docs copied verbatim; never edit them by hand. `components/spec-explorer/spec-viewer.tsx` fetches one, renders it with marked, sanitizes it with DOMPurify, adds heading anchors, keeps links between mirrored docs inside the explorer, and resolves other relative links to GitHub. The open doc lives in the URL (`/spec-explorer?doc=<slug>#<heading>`). Full-text search (`components/spec-explorer/spec-search.tsx`) indexes that same rendered HTML, one section per heading, on the first query of three or more characters.
 
 Refresh them with `bun run sync:docs <path-to-asupersync-checkout>`; add `--check` to only report drift (exit 1). It also compares `siteConfig` versions with upstream `Cargo.toml` and `CHANGELOG.md`.
 

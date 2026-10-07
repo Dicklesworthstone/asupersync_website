@@ -75,6 +75,26 @@ test("spec explorer: deep link opens a doc at a heading, and navigation is URL-d
   await expect(page).toHaveURL(/\?doc=onramp$/);
 });
 
+test("spec explorer: full-text search jumps to the matching section", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto("/spec-explorer");
+  const input = page.getByLabel("Search spec documents").last();
+  const results = page.getByRole("region", { name: "Matches in the text of the docs" }).last();
+
+  // No doc title mentions this; it's a heading inside the integration guide.
+  await input.fill("obligation leak escalation");
+  await expect(results.getByRole("button").first()).toContainText("Obligation leak escalation policy");
+  await results.getByRole("button").first().click();
+  await expect(page).toHaveURL(/\?doc=integration#obligation-leak-escalation-policy$/);
+  await expect(page.locator('[id="obligation-leak-escalation-policy"]').last()).toBeInViewport();
+
+  // A hit in the doc that's already open still scrolls to its heading.
+  await input.fill("wasm32 guardrails");
+  await results.getByRole("button", { name: /wasm32 Guardrails/ }).first().click();
+  await expect(page).toHaveURL(/\?doc=integration#wasm32-guardrails$/);
+  await expect(page.locator('[id="wasm32-guardrails"]').last()).toBeInViewport();
+});
+
 test("spec explorer: an open doc doesn't re-render in a loop", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await page.goto("/spec-explorer?doc=onramp");
