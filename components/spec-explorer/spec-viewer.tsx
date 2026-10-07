@@ -140,7 +140,14 @@ export default function SpecViewer() {
   const openSection = useCallback((doc: SpecDoc, headingId: string | null) => {
     navigateInExplorer(specDocHref(doc.slug, headingId ?? undefined));
   }, []);
-  const [searchQuery, setSearchQuery] = useState("");
+  // ?q= (from the command palette) seeds the search box; it doesn't track it.
+  const qParam = searchParams.get("q");
+  const [searchQuery, setSearchQuery] = useState(qParam ?? "");
+  const [seenQParam, setSeenQParam] = useState(qParam);
+  if (qParam !== seenQParam) {
+    setSeenQParam(qParam);
+    if (qParam !== null) setSearchQuery(qParam);
+  }
   const [activeCategory, setActiveCategory] = useState<SpecCategory | "All">("All");
   const specColumns = useMemo<ColumnDef<SpecDoc>[]>(
     () => [

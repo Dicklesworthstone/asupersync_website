@@ -134,8 +134,18 @@ test("command palette: search reaches demos, docs, and glossary terms", async ({
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/spec-explorer\?doc=onramp$/);
 
+  // Anything longer than two characters can go on to the docs' full text.
   await page.keyboard.press("Control+k");
-  await page.keyboard.type("zzqxv");
+  await page.keyboard.type("escalation policy");
+  await dialog.getByRole("option", { name: /Search the text of all/ }).click();
+  await expect(page).toHaveURL(/\/spec-explorer\?q=escalation%20policy$/);
+  await expect(page.getByLabel("Search spec documents").last()).toHaveValue("escalation policy");
+  await expect(
+    page.getByRole("region", { name: "Matches in the text of the docs" }).last().getByRole("button").first()
+  ).toContainText("Obligation leak escalation policy");
+
+  await page.keyboard.press("Control+k");
+  await page.keyboard.type("zq");
   await expect(dialog).toContainText("Nothing matches");
 });
 

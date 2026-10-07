@@ -12,6 +12,7 @@ import {
   HelpCircle,
   Search,
   Sparkles,
+  TextSearch,
   type LucideIcon,
 } from "lucide-react";
 import { useSite } from "@/lib/site-state";
@@ -19,7 +20,7 @@ import { useBodyScrollLock } from "@/hooks/use-body-scroll-lock";
 import { faq, glossaryTerms, navItems, showcaseDemos, siteConfig } from "@/lib/content";
 import { specDocs, specDocHref } from "@/lib/spec-docs";
 
-type Group = "Pages" | "Sections" | "Demos" | "Docs" | "Glossary" | "FAQ" | "Links";
+type Group = "Pages" | "Sections" | "Demos" | "Docs" | "Glossary" | "FAQ" | "Links" | "Full text";
 
 interface Entry {
   id: string;
@@ -31,7 +32,7 @@ interface Entry {
   external?: boolean;
 }
 
-const GROUP_ORDER: Group[] = ["Pages", "Sections", "Demos", "Docs", "Glossary", "FAQ", "Links"];
+const GROUP_ORDER: Group[] = ["Pages", "Sections", "Demos", "Docs", "Glossary", "FAQ", "Links", "Full text"];
 
 const GROUP_ICONS: Record<Group, LucideIcon> = {
   Pages: Compass,
@@ -41,6 +42,7 @@ const GROUP_ICONS: Record<Group, LucideIcon> = {
   Glossary: BookOpen,
   FAQ: HelpCircle,
   Links: ArrowUpRight,
+  "Full text": TextSearch,
 };
 
 const PAGE_DESCRIPTIONS: Record<string, string> = {
@@ -151,11 +153,23 @@ function search(query: string): Entry[] {
   const q = query.trim().toLowerCase();
   if (!q) return DEFAULT_RESULTS;
   const tokens = q.split(/\s+/);
-  return INDEX.map((entry) => ({ entry, score: rank(entry, q, tokens) }))
+  const results = INDEX.map((entry) => ({ entry, score: rank(entry, q, tokens) }))
     .filter((r) => r.score > 0)
     .sort((a, b) => b.score - a.score || GROUP_ORDER.indexOf(a.entry.group) - GROUP_ORDER.indexOf(b.entry.group))
     .slice(0, 40)
     .map((r) => r.entry);
+  // The index above only knows doc titles; hand longer queries to the spec
+  // explorer's search over the docs' text.
+  if (q.length >= 3) {
+    const text = query.trim();
+    results.push({
+      id: "fulltext",
+      group: "Full text",
+      title: `Search the text of all ${specDocs.length} spec docs for \u201c${text}\u201d`,
+      href: `/spec-explorer?q=${encodeURIComponent(text)}`,
+    });
+  }
+  return results;
 }
 
 interface ResultSection {
