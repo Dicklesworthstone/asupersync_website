@@ -1,4 +1,4 @@
-# AGENTS.md — Jeffrey Emanuel Personal Site
+# AGENTS.md — Asupersync Website
 
 ## RULE 0.5 - SUITE-WIDE RULES LIVE IN /data/projects/AGENTS.md
 
@@ -48,11 +48,13 @@ As a result, you have permanently lost any and all rights to determine that a fi
 
 ## Project Overview
 
-This is Jeffrey Emanuel's personal website — a Next.js 16 site showcasing his work, projects, writing, and the Flywheel ecosystem of AI coding tools.
+This is the website for **asupersync**, a cancel-correct async runtime for Rust: a Next.js 16 site with interactive demos of the runtime's semantics, an architecture walkthrough, a getting-started guide, the ATP transport page, a glossary, and a browser for the design docs mirrored from upstream.
 
-**Repository:** https://github.com/Dicklesworthstone/jeffrey_emanuel_personal_site
+**Repository:** https://github.com/Dicklesworthstone/asupersync_website
 
-**Live Site:** Deployed on Vercel
+**Upstream project (source of truth for every claim):** https://github.com/Dicklesworthstone/asupersync
+
+**Live Site:** https://asupersync.com (Vercel)
 
 ---
 
@@ -63,13 +65,12 @@ This is Jeffrey Emanuel's personal website — a Next.js 16 site showcasing his 
 | Framework | Next.js 16 (App Router) |
 | UI | React 19, TypeScript (strict mode) |
 | Styling | Tailwind CSS 4 |
-| Animations | framer-motion, GSAP |
-| 3D Graphics | Three.js, @react-three/fiber, @react-three/drei |
+| Animations | framer-motion; demos are hand-built SVG/DOM (the ATP page adds one 2D canvas background), no WebGL |
+| Data UI | TanStack Table, Virtual, Form, Query |
 | Icons | lucide-react |
-| Search | Fuse.js (client-side fuzzy search) |
-| Markdown | gray-matter, react-markdown, rehype, remark |
-| Math | KaTeX for LaTeX rendering |
-| Testing | Playwright (E2E) |
+| Search | Hand-rolled token scorer in the command palette (no search library) |
+| Markdown | marked + DOMPurify, client-side, for the mirrored spec docs |
+| Testing | Playwright smoke suite (`tests/smoke.spec.ts`) |
 | Package Manager | **bun** (NEVER npm, yarn, or pnpm) |
 | Deployment | Vercel |
 
@@ -130,90 +131,79 @@ We do **not** care about backwards compatibility — we want the cleanest possib
 ## Project Structure
 
 ```
-├── app/                    # Next.js App Router pages
-│   ├── page.tsx           # Homepage
-│   ├── about/             # About page
-│   ├── projects/          # Projects showcase
-│   ├── writing/           # Blog/essays (markdown-driven)
-│   ├── consulting/        # Consulting services
-│   ├── media/             # Press & media appearances
-│   └── contact/           # Contact page
-├── components/            # React components
-│   ├── hero.tsx          # Homepage hero with 3D scene
-│   ├── flywheel-*.tsx    # Flywheel ecosystem visualization
-│   ├── command-palette.tsx # Cmd+K search interface
-│   ├── site-header.tsx   # Navigation header
+├── app/                       # Next.js App Router pages
+│   ├── page.tsx               # Homepage: tokio mapping, costs, features, roadmap
+│   ├── showcase/              # The interactive demos, one section per demo
+│   ├── architecture/          # Core types, cancel protocol, capabilities, proofs
+│   ├── getting-started/       # Install, on-ramp, first programs
+│   ├── atp/                   # ATP transport page (renders components/atp/)
+│   ├── spec-explorer/         # Browser for the mirrored design docs
+│   ├── glossary/              # Virtualized term list; ?term=Name deep links
+│   └── layout.tsx             # Root layout, metadata, skip link
+├── components/
+│   ├── viz/                   # One component per demo (dynamically imported)
+│   ├── spec-explorer/         # Doc sidebar, search, markdown viewer
+│   ├── atp/                   # ATP page body
+│   ├── command-palette.tsx    # Ctrl/Cmd+K search over pages, demos, docs, glossary, FAQ
+│   ├── client-shell.tsx       # Header, footer, palette, page transitions
+│   ├── site-header.tsx        # Navigation header
 │   └── ...
-├── lib/                   # Utilities and data
-│   ├── content.ts        # Site content (projects, threads, etc.)
-│   ├── constants.ts      # Site configuration
-│   ├── utils.ts          # Helper functions
-│   └── mdx.ts            # Markdown processing
-├── content/              # Markdown content files
-│   └── writing/          # Blog posts in markdown
-├── public/               # Static assets
-│   └── images/           # Images, favicons
-├── hooks/                # Custom React hooks
-└── .beads/               # Issue tracking (br)
+├── lib/
+│   ├── content.ts             # siteConfig, nav, showcase demos, glossary, FAQ, benchmarks, ...
+│   ├── spec-docs.ts           # Registry of mirrored docs (slug, file, category)
+│   ├── site-state.tsx         # Lab Mode + palette state, global shortcuts
+│   └── utils.ts               # Helper functions
+├── public/
+│   ├── spec-docs/             # Docs mirrored verbatim from upstream (via sync:docs)
+│   └── images/
+├── scripts/sync-spec-docs.ts  # `bun run sync:docs <checkout>`: refresh docs, check versions
+├── tests/smoke.spec.ts        # Playwright smoke suite
+├── hooks/                     # Custom React hooks
+└── .beads/                    # Issue tracking (br)
 ```
 
 ---
 
 ## Key Components & Patterns
 
-### Three.js 3D Scene
+### Interactive Demos (`components/viz/`)
 
-The homepage features a 3D visualization using Three.js + React Three Fiber. Key considerations:
+Each demo is a self-contained client component that simulates one piece of runtime behavior (region trees, the cancel protocol, obligations, scheduler lanes, oracles, ...). Key considerations:
 
-* **Performance:** The scene must respect `prefers-reduced-motion`. Mobile devices get reduced quality.
-* **Error Boundaries:** The 3D scene has error boundaries to prevent crashes from breaking the page.
-* **Lazy Loading:** Heavy 3D components are dynamically imported.
+* **Accuracy first:** a demo illustrates what the upstream code does. Labels, numbers, and state names must match upstream source; when upstream changes, the demo changes.
+* **Lazy Loading:** demos are imported with `dynamic(..., { ssr: false })` so they never block the first paint.
+* **Reduced motion:** respect `prefers-reduced-motion`, but never branch server-rendered markup on `useReducedMotion()`; that causes hydration mismatches.
+* **Error Boundaries:** `components/error-boundary.tsx` keeps one broken demo from taking down the page.
 
 ```tsx
-// Pattern for 3D components
-import dynamic from 'next/dynamic';
-
-const HeroScene = dynamic(() => import('@/components/hero-scene'), {
-  ssr: false,
-  loading: () => <div className="hero-placeholder" />
-});
+const RegionTreeViz = dynamic(() => import("@/components/viz/region-tree-viz"), { ssr: false });
 ```
 
 ### Content Management
 
-All site content lives in `lib/content.ts`:
+Site content lives in `lib/content.ts`:
 
-* **Projects:** Array of project objects with title, description, tags, links
-* **Threads:** X/Twitter posts showcased on homepage
-* **Timeline:** Career/experience timeline
-* **Site Config:** Metadata, social links, etc.
+* **siteConfig:** name, URLs, `version` (latest on crates.io) and `mainVersion` (unreleased line on main)
+* **navItems:** header, footer, and palette navigation
+* **showcaseChapters / showcaseDemos:** every showcase demo with its status and upstream `sources`/`docs`; `app/showcase/page.tsx` maps each id to its icon, viz, and prose
+* **Homepage data:** features, tokio mappings, benchmark rows, comparison table, roadmap, changelog
+* **glossaryTerms, labOracles, faq**
 
-When adding content, edit `lib/content.ts` directly — do NOT create separate data files.
+The mirrored doc registry is `lib/spec-docs.ts`. When adding content, edit these files directly — do NOT create separate data files.
 
-### Markdown Processing
+### Spec Docs (Markdown)
 
-Blog posts in `/content/writing/` use frontmatter + markdown:
+The files in `public/spec-docs/` are upstream docs copied verbatim; never edit them by hand. `components/spec-explorer/spec-viewer.tsx` fetches one, renders it with marked, sanitizes it with DOMPurify, adds heading anchors, keeps links between mirrored docs inside the explorer, and resolves other relative links to GitHub. The open doc lives in the URL (`/spec-explorer?doc=<slug>#<heading>`).
 
-```markdown
----
-title: "Post Title"
-date: "2025-01-15"
-description: "Brief description"
-tags: ["ai", "coding"]
----
-
-Post content with **markdown** support...
-```
-
-The `lib/mdx.ts` module handles parsing with gray-matter, rehype, and remark plugins.
+Refresh them with `bun run sync:docs <path-to-asupersync-checkout>`; add `--check` to only report drift (exit 1). It also compares `siteConfig` versions with upstream `Cargo.toml` and `CHANGELOG.md`.
 
 ### Command Palette (Search)
 
-The site has a Cmd+K command palette using Fuse.js for fuzzy search:
+The site has a Ctrl/Cmd+K command palette (also the header's search button):
 
-* Searches across projects, writing, and navigation
-* Implemented in `components/command-palette.tsx`
-* Uses keyboard shortcuts and focus management
+* Searches pages, homepage/architecture sections, showcase demos, spec docs, glossary terms, and the FAQ
+* Implemented in `components/command-palette.tsx`; the index is built from `lib/content.ts` and `lib/spec-docs.ts`, so new demos, docs, and terms show up without extra wiring
+* Open state and the global shortcut live in `lib/site-state.tsx`
 
 ---
 
@@ -244,12 +234,15 @@ We use **Playwright** for end-to-end testing:
 # Install Playwright browsers (one-time)
 bunx playwright install
 
-# Run E2E tests
-bunx playwright test
+# Build, serve on port 3100, and run the suite
+bun run test:e2e
+
+# Against a server you already started on port 3100
+PLAYWRIGHT_REUSE_SERVER=1 bunx playwright test
 ```
 
-Test files live in the project root or a `tests/` directory. Tests should:
-* Cover critical user flows (navigation, search, 3D scene loading)
+Tests live in `tests/`. Tests should:
+* Cover critical user flows (every route renders with a clean console and no horizontal overflow, spec doc deep links, palette search, showcase anchors)
 * Use realistic scenarios, not mocked data
 * Verify the site works across viewport sizes
 
@@ -442,35 +435,27 @@ cass capabilities --json
 
 ## Common Tasks
 
-### Adding a New Project
+### Adding a Showcase Demo
 
-Edit `lib/content.ts` and add to the `projects` array:
+1. Add an entry to `showcaseDemoList` in `lib/content.ts` (id, title, chapter, status, summary, and the upstream `sources` paths it illustrates)
+2. Build the viz in `components/viz/`
+3. Add the matching `DEMO_UI` entry (icon, viz, prose) in `app/showcase/page.tsx`; TypeScript flags a missing one
 
-```typescript
-{
-  title: "Project Name",
-  description: "Brief description",
-  href: "https://github.com/...",
-  tags: ["typescript", "ai"],
-  kind: "oss", // or "product", "research", "flywheel"
-  stars: 123,  // optional GitHub stars
-}
-```
+### Mirroring Another Spec Doc
 
-### Adding a Blog Post
+1. Add it to `specDocs` in `lib/spec-docs.ts` (if it doesn't live under upstream `docs/`, update `specDocUpstreamPath`)
+2. Run `bun run sync:docs <path-to-asupersync-checkout>`
 
-1. Create `content/writing/post-slug.md` with frontmatter
-2. The post will automatically appear in the writing section
+### Following an Upstream Change
 
-### Updating the Flywheel Visualization
-
-The flywheel tools are defined in `lib/content.ts` under `flywheelTools`. Edit there to add/modify tools.
+1. `bun run sync:docs <checkout>` and read the doc diffs it reports
+2. Update `siteConfig` versions, benchmark rows, `labOracles`, the roadmap, and any demo or prose the change contradicts
 
 ### Adding a New Page
 
 1. Create `app/new-page/page.tsx`
-2. Add navigation link in `components/site-header.tsx`
-3. Add to search index in `components/command-palette.tsx`
+2. Add it to `navItems` in `lib/content.ts` (header, footer, and palette all read it)
+3. Add its route to `ROUTES` in `tests/smoke.spec.ts`
 
 ---
 
@@ -478,20 +463,19 @@ The flywheel tools are defined in `lib/content.ts` under `flywheelTools`. Edit t
 
 ### Core Web Vitals
 
-* **LCP:** Hero image should have `priority` prop, use blur placeholder
-* **CLS:** All images need explicit width/height
-* **INP:** Avoid blocking the main thread, especially in 3D scene
+* **LCP:** Keep above-the-fold content server-rendered; demos load dynamically below it
+* **CLS:** All images need explicit width/height, and dynamically loaded demos need a sized container
+* **INP:** Avoid blocking the main thread, especially in demo animation loops
 
-### Three.js Optimization
+### Demo Animations
 
-* Reduce geometry complexity on mobile
-* Cap device pixel ratio at 2
+* Don't run animation loops for demos that are off screen; `hooks/use-intersection-observer.ts` is there for that
 * Respect `prefers-reduced-motion`
-* Use `useFrame` carefully — avoid expensive computations every frame
+* Keep render-time state stable: an unmemoized array passed to TanStack Table once re-rendered the spec viewer in a loop
 
 ### Bundle Size
 
-* Use dynamic imports for heavy components (Three.js, syntax highlighter)
+* Use dynamic imports for heavy components (demos, the markdown viewer)
 * Analyze with `ANALYZE=true bun run build` (if configured)
 * Watch for large dependencies being imported unnecessarily
 
@@ -531,12 +515,15 @@ Currently the site is mostly static with no external API dependencies for core f
 
 | File | Purpose |
 |------|---------|
-| `lib/content.ts` | All site content (projects, timeline, threads) |
-| `lib/constants.ts` | Site configuration and metadata |
-| `components/hero.tsx` | Homepage hero with 3D scene |
-| `components/command-palette.tsx` | Cmd+K search interface |
+| `lib/content.ts` | Site content and config (siteConfig, nav, demos, glossary, FAQ, benchmarks) |
+| `lib/spec-docs.ts` | Mirrored doc registry and upstream paths |
+| `app/showcase/page.tsx` | Showcase page; maps each demo id to its viz and prose |
+| `components/command-palette.tsx` | Ctrl/Cmd+K search interface |
+| `components/spec-explorer/spec-viewer.tsx` | Spec doc browser and markdown rendering |
 | `app/layout.tsx` | Root layout with metadata |
-| `tailwind.config.ts` | Tailwind configuration |
-| `next.config.mjs` | Next.js configuration |
+| `app/globals.css` | Tailwind 4 setup and theme (there is no tailwind.config) |
+| `next.config.ts` | Next.js configuration |
+| `scripts/sync-spec-docs.ts` | Upstream doc sync and version drift check |
+| `tests/smoke.spec.ts` | Playwright smoke suite |
 
 For any web requests you must make with curl or otherwise, always set your user agent string to be "OpenAI File Downloader, XaiImageApiFetch/1.0"
