@@ -8,15 +8,22 @@ export const siteConfig = {
   github: "https://github.com/Dicklesworthstone/asupersync",
   demoUrl: "https://dicklesworthstone.github.io/asupersync/asupersync_web_demo.html",
   cratesUrl: "https://crates.io/crates/asupersync",
-  // Latest version published to crates.io, and the unreleased line on main.
-  version: "0.5.0",
-  mainVersion: "0.6.0",
+  // Latest version published to crates.io, and the version Cargo.toml names on main.
+  version: "0.6.2",
+  mainVersion: "0.6.2",
   social: {
     github: "https://github.com/Dicklesworthstone/asupersync",
     x: "https://x.com/doodlestein",
     authorGithub: "https://github.com/Dicklesworthstone",
   },
 };
+
+// Main keeps the released version number until its next bump, so its unreleased
+// commits past the release have no version of their own yet.
+export const mainVersionLabel =
+  siteConfig.mainVersion === siteConfig.version
+    ? "newer commits on main"
+    : `${siteConfig.mainVersion} on main`;
 
 export const navItems = [
   { href: "/", label: "Home" },
@@ -1147,7 +1154,7 @@ export const faq: FaqItem[] = [
   {
     question: "Is it production-ready?",
     answer:
-      "Not in the sense tokio is. It's pre-1.0 and experimental. The author's own projects run on it in production, and no independent production user is known. v0.5.0 is on crates.io; main carries the unreleased 0.6.0 line.",
+      "Not in the sense tokio is. It's pre-1.0 and experimental. The author's own projects run on it in production, and no independent production user is known. v0.6.2 is on crates.io; main carries unreleased commits past it.",
   },
   {
     question: "Can I use tokio crates with it?",

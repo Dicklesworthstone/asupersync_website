@@ -2,7 +2,7 @@
 
 import { Github, Twitter, ArrowUp, Activity } from "lucide-react";
 import Link from "next/link";
-import { siteConfig, navItems } from "@/lib/content";
+import { siteConfig, mainVersionLabel, navItems } from "@/lib/content";
 import { SyncContainer } from "./sync-elements";
 import { Magnetic } from "./motion-wrapper";
 import GlitchText from "./glitch-text";
@@ -68,7 +68,7 @@ export default function SiteFooter() {
                  </div>
                  <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-[0.3em] text-slate-600">
                     <Activity className="h-3 w-3" />
-                    <span>v{siteConfig.version} on crates.io · {siteConfig.mainVersion} on main</span>
+                    <span>v{siteConfig.version} on crates.io · {mainVersionLabel}</span>
                  </div>
               </div>
             </div>

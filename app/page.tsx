@@ -34,6 +34,7 @@ import { Magnetic, BorderBeam } from "@/components/motion-wrapper";
 import { Tooltip } from "@/components/tooltip";
 import {
   siteConfig,
+  mainVersionLabel,
   heroStats,
   features,
   codeExample,
@@ -183,7 +184,7 @@ export default function HomePage() {
               className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-blue-500/30 bg-blue-500/5 text-[10px] font-black uppercase tracking-[0.3em] text-blue-500 mb-8 hover:border-blue-500/60 transition-colors"
             >
               <div className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-ping" />
-              v{siteConfig.version} on crates.io · {siteConfig.mainVersion} on main
+              v{siteConfig.version} on crates.io · {mainVersionLabel}
             </motion.a>
 
             <motion.h1

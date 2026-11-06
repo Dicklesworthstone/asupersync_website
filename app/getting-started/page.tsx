@@ -144,11 +144,22 @@ export default function GettingStartedPage() {
         icon="rocket"
         eyebrow="Step 1"
         title="Install"
-        kicker={`v${siteConfig.version} is the latest release on crates.io. The main branch carries the unreleased ${siteConfig.mainVersion} line.`}
+        kicker={
+          siteConfig.mainVersion === siteConfig.version
+            ? `v${siteConfig.version} is the latest release on crates.io. The main branch carries unreleased commits past it.`
+            : `v${siteConfig.version} is the latest release on crates.io. The main branch carries the unreleased ${siteConfig.mainVersion} line.`
+        }
       >
         <div className="space-y-6">
           <CopyCommand command={INSTALL_CRATES} label={`Latest release (${siteConfig.version})`} />
-          <CopyCommand command={INSTALL_GIT} label={`Tracking main (${siteConfig.mainVersion}, unreleased)`} />
+          <CopyCommand
+            command={INSTALL_GIT}
+            label={
+              siteConfig.mainVersion === siteConfig.version
+                ? "Tracking main (unreleased)"
+                : `Tracking main (${siteConfig.mainVersion}, unreleased)`
+            }
+          />
           <div className="grid gap-4 md:grid-cols-2 text-sm text-slate-400 leading-relaxed">
             <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-6">
               <strong className="block text-white mb-2">Rust version</strong>
